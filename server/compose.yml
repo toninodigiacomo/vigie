@@ -1,0 +1,78 @@
+# Vigie — Docker Compose
+#
+#   vigie-web  (8212-vigie)      the only exposed tier: web interface + /api relay
+#   vigie-api  (8213-vigie-api)  PHP API, no published port
+#   existing MariaDB             "VIGIE" database, user restricted to vigie-api's IP
+#
+# Before the first start: see README, "Installation" section.
+services:
+  vigie-web:
+    container_name: 8212-vigie
+    image: vigie-web:3
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM httpd:2.4-alpine
+        RUN sed -i \
+              -e 's/^#\(LoadModule proxy_module\)/\1/' \
+              -e 's/^#\(LoadModule proxy_http_module\)/\1/' \
+              -e 's/^#\(LoadModule headers_module\)/\1/' \
+              conf/httpd.conf \
+         && echo 'Include conf/extra/vigie.conf' >> conf/httpd.conf
+    restart: unless-stopped
+    ports:
+      - "${VIGIE_PORT:-8212}:80"
+    volumes:
+      - ./web/public:/usr/local/apache2/htdocs:ro
+      - ./web/vigie.conf:/usr/local/apache2/conf/extra/vigie.conf:ro
+    depends_on:
+      - vigie-api
+    networks:
+      vigie:
+        ipv4_address: ${VIGIE_WEB_IP:-172.18.0.212}
+        aliases: [212-vigie]
+
+  vigie-api:
+    container_name: 8213-vigie-api
+    image: vigie-api:3
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM php:8.2-apache
+        RUN docker-php-ext-install pdo_mysql \
+         && printf '<Directory /var/www/html>\n    FallbackResource /index.php\n</Directory>\nServerTokens Prod\nServerSignature Off\n' \
+              > /etc/apache2/conf-enabled/vigie.conf \
+         && ln -s /var/www/bin/vigie-admin /usr/local/bin/vigie-admin \
+         && mkdir -p /var/lib/vigie/sessions && chown www-data:www-data /var/lib/vigie/sessions && chmod 700 /var/lib/vigie/sessions
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Zurich
+      DB_HOST: ${VIGIE_DB_HOST:-8190-mariadb}
+      DB_NAME: ${VIGIE_DB_NAME:-VIGIE}
+      DB_USER: ${VIGIE_DB_USER:-vigie}
+      DB_PASSWORD: ${VIGIE_DB_PASSWORD:?set VIGIE_DB_PASSWORD in .env}
+      VIGIE_APP_KEY: ${VIGIE_APP_KEY:?set VIGIE_APP_KEY in .env}      # encrypts the TOTP secret (64 hex chars)
+      VIGIE_READ_TOKEN: ${VIGIE_READ_TOKEN:-}                         # Homepage widget key (empty = open read access)
+      VIGIE_PUBLIC_URL: ${VIGIE_PUBLIC_URL:-}                        # Vigie's address as seen by the agents
+      VIGIE_DEFAULT_INTERVAL: ${VIGIE_DEFAULT_INTERVAL:-15}          # minutes between two agent syncs
+      VIGIE_FAST_WINDOW: ${VIGIE_FAST_WINDOW:-15}                    # minutes of fast sync after a change
+      VIGIE_SESSION_DIR: /var/lib/vigie/sessions                     # kept in a volume: sessions survive a rebuild
+    volumes:
+      - ./api/public:/var/www/html:ro
+      - ./api/inc:/var/www/inc:ro
+      - ./api/bin:/var/www/bin:ro
+      - ./api/schema.sql:/var/www/schema.sql:ro
+      - vigie-sessions:/var/lib/vigie/sessions
+    networks:
+      vigie:
+        ipv4_address: ${VIGIE_API_IP:-172.18.0.213}
+        aliases: [213-vigie-api]
+
+volumes:
+  vigie-sessions:
+
+# Existing Docker network shared with MariaDB (and Homepage, if you use it)
+networks:
+  vigie:
+    name: ${VIGIE_NETWORK:-root_default}
+    external: true

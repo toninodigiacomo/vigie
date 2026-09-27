@@ -1,0 +1,283 @@
+#!/usr/bin/env php
+<?php
+declare(strict_types=1);
+
+// vigie-admin — rescue administration and diagnostics, from the command line.
+// Day-to-day administration happens in the web interface; this command applies
+// exactly the same rules (inc/admin.php). Every action is audited.
+//   docker exec -it 8213-vigie-api vigie-admin <command> [arguments]
+
+if (PHP_SAPI !== 'cli') exit(1);
+require __DIR__ . '/../inc/util.php';
+require __DIR__ . '/../inc/db.php';
+require __DIR__ . '/../inc/agent.php';
+require __DIR__ . '/../inc/state.php';
+require __DIR__ . '/../inc/auth.php';
+require __DIR__ . '/../inc/admin.php';
+
+const HELP = <<<'TXT'
+Access
+  admin:setup-code                               new first-run setup code
+  admin:reset --confirm=yes                      delete the administrator (lost password or phone)
+                                                 and put Vigie back into first-run setup
+Diagnostics
+  doctor                                         extensions, files, key, database
+  db:init                                        create or update the tables
+  audit [count]                                  latest audited actions
+Servers
+  server:list | server:show <name>
+  server:add <name> [--desc=…] [--interval=15]   server:enroll <name>
+  server:set <name> interval=<min> | desc=<text> server:fast <name> [minutes]
+  server:revoke <name>                           server:delete <name>
+Services
+  service:list [server] | service:show <id>
+  service:add <server> <task> <name> [PARAM=value…]
+  service:set <id> [PARAM=value…] [--name=…]     (PARAM= clears the value)
+  service:test <id> | service:run <id>           job:show <id>
+  service:schedule <id> "<cron>" [--force=1] | off
+  service:delete <id>
+TXT;
+
+function out(string $s = ''): void { fwrite(STDOUT, $s . PHP_EOL); }
+function fail(string $s): never { fwrite(STDERR, "vigie-admin: $s" . PHP_EOL); exit(1); }
+
+/** Aligned table row, correct with multi-byte characters. */
+function row(array $cols, array $widths): string
+{
+    $line = '';
+    foreach ($cols as $i => $c) {
+        $c = (string) $c;
+        $w = $widths[$i] ?? 0;
+        if ($w && mb_strwidth($c) > $w - 1) $c = mb_strimwidth($c, 0, $w - 1, '…');
+        $line .= $c . str_repeat(' ', max(1, $w - mb_strwidth($c)));
+    }
+    return rtrim($line);
+}
+
+function parse_args(array $argv): array
+{
+    $pos = []; $opt = []; $kv = [];
+    foreach ($argv as $a) {
+        if (preg_match('/^--([a-z-]+)=(.*)$/s', $a, $m)) $opt[$m[1]] = $m[2];
+        elseif (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s', $a, $m)) $kv[$m[1]] = $m[2];
+        else $pos[] = $a;
+    }
+    return [$pos, $opt, $kv];
+}
+
+function enroll_hint(string $name, string $code): void
+{
+    $url = getenv('VIGIE_PUBLIC_URL') ?: 'http://<vigie-address>';
+    out("Enrolment code for $name (valid 30 min, single use): $code");
+    out("On the server, in the agent directory:  ./vigie enroll $url $code");
+}
+
+function doctor(): int
+{
+    $ok = true;
+    $line = function (bool $pass, string $label, string $detail = '') use (&$ok): void {
+        $ok = $ok && $pass;
+        out(($pass ? '  OK      ' : '  FAIL    ') . $label . ($detail !== '' ? ": $detail" : ''));
+    };
+    out('PHP');
+    $line(PHP_VERSION_ID >= 80100, 'version ' . PHP_VERSION);
+    foreach (['pdo_mysql', 'mbstring', 'sodium'] as $ext) {
+        $line(extension_loaded($ext), "extension $ext", extension_loaded($ext) ? '' : 'missing, rebuild the image');
+    }
+    out('Files');
+    foreach (['public/index.php', 'inc/util.php', 'inc/db.php', 'inc/agent.php', 'inc/state.php', 'inc/auth.php', 'inc/admin.php', 'schema.sql'] as $f) {
+        $p = realpath(__DIR__ . '/../' . $f) ?: __DIR__ . '/../' . $f;
+        $line(is_readable($p), $p, is_readable($p) ? '' : 'not found, check the compose volumes');
+    }
+    out('Configuration');
+    try { vigie_app_key(); $line(true, 'VIGIE_APP_KEY'); } catch (VigieError $e) { $line(false, 'VIGIE_APP_KEY', $e->getMessage()); }
+    foreach (['DB_HOST', 'DB_NAME', 'DB_USER'] as $v) out("  INFO    $v: " . ((string) getenv($v) ?: 'default'));
+    $line((string) getenv('DB_PASSWORD') !== '', 'DB_PASSWORD', (string) getenv('DB_PASSWORD') !== '' ? 'set' : 'empty');
+    if ((string) getenv('VIGIE_READ_TOKEN') === '') out('  NOTE    VIGIE_READ_TOKEN empty: the Homepage API needs no key');
+    out('Database');
+    try {
+        $db = vigie_db();
+        $line(true, 'connection', (string) $db->query('SELECT VERSION()')->fetchColumn());
+        $tables = $db->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+        foreach (['servers', 'services', 'jobs', 'runs', 'audit', 'admin', 'app_state'] as $t) {
+            $line(in_array($t, $tables, true), "table $t", in_array($t, $tables, true) ? '' : 'missing, run "vigie-admin db:init"');
+        }
+        if (in_array('admin', $tables, true)) {
+            out('  INFO    administrator: ' . (vigie_admin_exists() ? 'configured' : 'to be configured (first sign-in)'));
+        }
+    } catch (Throwable $e) {
+        $line(false, 'connection', $e->getMessage());
+        $msg = $e->getMessage();
+        if (str_contains($msg, 'getaddrinfo')) out('          → unknown host name: check DB_HOST and the Docker network');
+        if (str_contains($msg, 'Access denied')) out('          → wrong password, or user not allowed from this container\'s IP');
+        if (str_contains($msg, 'Unknown database')) out('          → missing database, or DB_NAME with a different case');
+    }
+    out($ok ? PHP_EOL . 'All good.' : PHP_EOL . 'At least one item needs fixing.');
+    return $ok ? 0 : 1;
+}
+
+[$pos, $opt, $kv] = parse_args(array_slice($argv, 1));
+$cmd = array_shift($pos) ?? 'help';
+if ($cmd === 'doctor') exit(doctor());
+$now = time();
+$A = 'cli';
+
+try {
+    switch ($cmd) {
+        case 'db:init':
+            vigie_schema_ensure(true);
+            vigie_audit($A, 'db.init');
+            out('Tables created or already present.');
+            if (!vigie_admin_exists()) {
+                out('First-run setup code (valid ' . (VIGIE_SETUP_TTL / 60) . ' min): ' . vigie_setup_code_issue());
+                out('Open the web interface: the first sign-in configures the administrator.');
+            }
+            break;
+
+        case 'admin:setup-code':
+            if (vigie_admin_exists()) fail('an administrator already exists (use admin:reset to start over)');
+            out('First-run setup code (valid ' . (VIGIE_SETUP_TTL / 60) . ' min): ' . vigie_setup_code_issue());
+            break;
+
+        case 'admin:reset':
+            if (($opt['confirm'] ?? '') !== 'yes') {
+                fail('deletes the administrator account and its TOTP. Run again with --confirm=yes to confirm.');
+            }
+            vigie_db()->exec('DELETE FROM admin');
+            vigie_audit($A, 'admin.reset', 'administrator account deleted');
+            out('Administrator deleted. First-run setup code: ' . vigie_setup_code_issue());
+            out('Sessions still open are refused on their next request.');
+            break;
+
+        case 'server:list':
+            $w = [16, 12, 12, 28, 0];
+            out(row(['SERVER', 'AGENT', 'SYNC', 'LAST CONTACT', 'SERVICES'], $w));
+            foreach (admin_servers() as $s) {
+                $agent = ['pending' => 'to enrol', 'silent' => 'silent', 'ok' => 'active'][$s['agent']['state']];
+                $seen = $s['agent']['last_seen'] ? vigie_ago($s['agent']['last_seen'], $now) : '-';
+                out(row([$s['name'], $agent, $s['interval'] . ' min', $seen, "{$s['active']}/{$s['services']} enabled"], $w));
+            }
+            break;
+
+        case 'server:show':
+            $d = admin_server((int) admin_server_by_name($pos[0] ?? fail('usage: server:show <name>'))['id']);
+            $f = (array) $d['facts'];
+            out("{$d['name']}  {$d['descr']}");
+            out('  System     : ' . ($f['os'] ?? '?') . ' (' . ($f['kernel'] ?? '?') . ')');
+            out('  Agent      : ' . ($d['agent_version'] ?? '-') . ', seen ' . ($d['last_seen'] ? vigie_ago($d['last_seen'], $now) : 'never'));
+            out("  Sync       : every {$d['interval']} min");
+            out('  Mounts     : ' . implode(', ', $f['mounts'] ?? []));
+            out('  Containers : ' . implode(', ', $f['containers'] ?? []));
+            out('  Secrets    : ' . implode(', ', $f['secret_names'] ?? []) . '  (names only)');
+            foreach ($d['sync_errors'] as $e) out("  REJECTED   : $e");
+            foreach ($d['catalog'] as $t) {
+                out("  Task {$t['name']}: {$t['descr']}");
+                foreach ($t['params'] as $p) {
+                    out('    ' . row([$p['name'], $p['type'], $p['required'] ? 'required' : 'optional', $p['label']], [16, 9, 10, 0]));
+                }
+            }
+            break;
+
+        case 'server:add':
+            $name = $pos[0] ?? fail('usage: server:add <name>');
+            $r = admin_server_create($name, $opt['desc'] ?? '', (int) ($opt['interval'] ?? getenv('VIGIE_DEFAULT_INTERVAL') ?: 15), $A);
+            enroll_hint($name, $r['code']);
+            break;
+
+        case 'server:enroll':
+            $s = admin_server_by_name($pos[0] ?? fail('usage: server:enroll <name>'));
+            enroll_hint($s['name'], admin_server_new_code((int) $s['id'], $A)['code']);
+            break;
+
+        case 'server:set':
+            $s = admin_server_by_name($pos[0] ?? fail('usage: server:set <name> interval=<min>'));
+            admin_server_update((int) $s['id'], $kv['desc'] ?? null, isset($kv['interval']) ? (int) $kv['interval'] : null, $A);
+            out("{$s['name']} updated (applied at the agent's next sync).");
+            break;
+
+        case 'server:fast':
+            $s = admin_server_by_name($pos[0] ?? fail('usage: server:fast <name> [minutes]'));
+            admin_server_fast((int) $s['id'], (int) ($pos[1] ?? 15), $A);
+            out("{$s['name']}: fast sync enabled, from its next sync.");
+            break;
+
+        case 'server:revoke':
+        case 'server:delete':
+            $s = admin_server_by_name($pos[0] ?? fail("usage: $cmd <name>"));
+            $cmd === 'server:revoke' ? admin_server_revoke((int) $s['id'], $A) : admin_server_delete((int) $s['id'], $A);
+            out($cmd === 'server:revoke' ? "Token of {$s['name']} revoked." : "{$s['name']} deleted.");
+            break;
+
+        case 'service:list':
+            $sql = 'SELECT s.*, v.name AS server_name FROM services s JOIN servers v ON v.id = s.server_id';
+            $st = vigie_db()->prepare($sql . (isset($pos[0]) ? ' WHERE v.name = ?' : '') . ' ORDER BY v.name, s.position, s.id');
+            $st->execute(isset($pos[0]) ? [$pos[0]] : []);
+            $w = [6, 14, 18, 34, 16, 0];
+            out(row(['ID', 'SERVER', 'TASK', 'NAME', 'SCHEDULE', 'ENABLED'], $w));
+            foreach ($st as $s) out(row([$s['id'], $s['server_name'], $s['task'], $s['name'], $s['schedule'] ?? '-', $s['enabled'] ? 'yes' : 'no'], $w));
+            break;
+
+        case 'service:show':
+            $s = admin_service((int) ($pos[0] ?? fail('usage: service:show <id>')));
+            out("Service {$s['id']} \"{$s['name']}\" on {$s['server_name']}, task {$s['task']}");
+            out('  Schedule : ' . ($s['schedule'] ?? 'none') . ($s['enabled'] ? ' (enabled)' : ' (disabled)'));
+            foreach ((array) $s['params'] as $k => $v) out('  ' . row([$k, $v], [18, 0]));
+            foreach ($s['jobs'] as $j) {
+                $res = $j['state'] === 'done' ? ($j['result_ok'] ? 'OK' : 'FAILED') : $j['state'];
+                out('  ' . row(['request ' . $j['id'], $j['kind'], $res, vigie_ago((int) $j['created_at'], $now)], [14, 7, 9, 0]));
+            }
+            break;
+
+        case 'service:add':
+            if (count($pos) < 3) fail('usage: service:add <server> <task> <name> [PARAM=value…]');
+            $id = admin_service_create((int) admin_server_by_name($pos[0])['id'], $pos[1], $pos[2], $kv, $A);
+            out("Service $id created (disabled). Next step: service:test $id");
+            break;
+
+        case 'service:set':
+            $s = admin_service((int) ($pos[0] ?? fail('usage: service:set <id> [PARAM=value…]')));
+            admin_service_update($s['id'], $opt['name'] ?? null, array_merge((array) $s['params'], $kv), null, null, $A);
+            out("Service {$s['id']} updated.");
+            break;
+
+        case 'service:test':
+        case 'service:run':
+            $r = admin_job_create((int) ($pos[0] ?? fail("usage: $cmd <id>")), $cmd === 'service:test' ? 'check' : 'run', $A);
+            $when = $r['delay']['code'] === 'fast' ? 'within a minute' : "at the next sync (within {$r['delay']['minutes']} min)";
+            out("Request {$r['id']} sent, handled $when. Result: job:show {$r['id']}");
+            break;
+
+        case 'service:schedule':
+            $id = (int) ($pos[0] ?? fail('usage: service:schedule <id> "<cron>" | off'));
+            $expr = ($pos[1] ?? '') === 'off' ? null : ($pos[1] ?? fail('cron expression expected'));
+            admin_service_schedule($id, $expr, isset($opt['force']), $A);
+            out($expr === null ? "Service $id disabled." : "Service $id scheduled \"$expr\" and enabled.");
+            break;
+
+        case 'service:delete':
+            admin_service_delete((int) ($pos[0] ?? fail('usage: service:delete <id>')), $A);
+            out('Service deleted.');
+            break;
+
+        case 'job:show':
+            $j = admin_job((int) ($pos[0] ?? 0));
+            $state = ['pending' => 'waiting for the agent', 'sent' => 'sent, in progress',
+                      'done' => $j['result_ok'] ? 'finished: OK' : 'finished: FAILED', 'expired' => 'expired without an answer'][$j['state']];
+            out("Request {$j['id']} ({$j['kind']}) for \"{$j['service_name']}\": $state");
+            if ($j['output']) out(PHP_EOL . rtrim($j['output']));
+            break;
+
+        case 'audit':
+            foreach (admin_audit((int) ($pos[0] ?? 30)) as $a) {
+                out(row([date('Y-m-d H:i', (int) $a['at']), $a['actor'], $a['action'], $a['detail']], [18, 22, 20, 0]));
+            }
+            break;
+
+        default:
+            out(HELP);
+    }
+} catch (VigieError $e) {
+    fail($e->getMessage());
+} catch (PDOException $e) {
+    fail('database: ' . $e->getMessage() . ' (run "vigie-admin doctor")');
+}

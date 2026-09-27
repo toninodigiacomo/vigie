@@ -1,0 +1,765 @@
+#!/bin/sh
+# ════════════════════════════════════════════════════════════════════════════
+#  vigie — Vigie agent
+#
+#    vigie enroll <url> <code>       register this server with Vigie
+#    vigie sync                      fetch configuration and requests (run by cron)
+#    vigie poll                      quick check for pending work, then sync if needed (cron)
+#    vigie run <service> [--job N]   run a service
+#    vigie check <service> [--job N] check a service's prerequisites, changing nothing
+#    vigie list                      services configured on this server
+#    vigie tasks                     available task types and their parameters
+#    vigie status                    latest result of each service
+#
+#  Pull model: the agent contacts Vigie, never the other way round. It only runs
+#  tasks present in tasks/ and re-validates every received parameter locally.
+#  POSIX sh: busybox ash (OpenWRT), dash and bash (Debian).
+# ════════════════════════════════════════════════════════════════════════════
+
+VIGIE_AGENT_VERSION=2.11
+set -u
+umask 077
+
+VIGIE_HOME=$(cd "$(dirname "$0")" && pwd)
+VIGIE_BIN="$VIGIE_HOME/vigie"
+VIGIE_CONF=${VIGIE_CONF:-$VIGIE_HOME/vigie.conf}
+TASKS_DIR="$VIGIE_HOME/tasks"
+PATH="$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin"
+
+die() { echo "vigie: $*" >&2; exit 2; }
+
+[ -r "$VIGIE_CONF" ] || die "configuration not found: $VIGIE_CONF"
+. "$VIGIE_CONF"
+
+: "${STATE_DIR:=/var/lib/vigie}"
+: "${SECRETS_FILE:=}"
+: "${VIGIE_URL:=}" "${AGENT_TOKEN:=}"
+: "${HEARTBEAT_SEC:=300}"
+: "${LOG_KEEP:=30}"
+: "${LOG_TAIL_LINES:=60}"
+: "${POLL:=yes}"                      # quick check every minute: tests and changes apply at once
+SVC_DIR="$STATE_DIR/services"
+
+# ── Helpers available to tasks ──────────────────────────────────────────────
+
+v_log()     { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*"; }
+v_warn()    { v_log "WARNING: $*"; printf '%s\n' "$*" >> "$RUN_TMP/warnings"; }
+v_fail()    { v_log "ERROR: $*";   printf '%s\n' "$*" >> "$RUN_TMP/errors"; }
+v_ok()      { v_log "OK: $*"; }
+v_summary() { printf '%s' "$*" > "$RUN_TMP/summary"; }
+v_metric()  { printf '%s=%s\n' "$1" "$2" >> "$RUN_TMP/metrics"; }
+
+v_is_mounted() { awk -v m="$1" '$2 == m { f = 1 } END { exit !f }' /proc/mounts; }
+
+v_require_mount() {
+    [ -n "${1:-}" ] || return 0
+    v_is_mounted "$1" && return 0
+    v_fail "$1 is not mounted, task aborted"
+    return 1
+}
+
+v_require_cmd() {
+    for _c in "$@"; do
+        command -v "$_c" >/dev/null 2>&1 || { v_fail "command not found: $_c"; return 1; }
+    done
+}
+
+v_require_dir() {   # directory [w]: exists (and is writable when "w")
+    [ -d "$1" ] || { v_fail "directory not found: $1"; return 1; }
+    if [ "${2:-}" = w ] && ! ( : > "$1/.vigie-write-test" && rm -f "$1/.vigie-write-test" ) 2>/dev/null; then
+        v_fail "directory not writable: $1"; return 1
+    fi
+}
+
+v_require_container() {
+    _st=$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)
+    [ "$_st" = true ] || { v_fail "container $1 missing or stopped"; return 1; }
+}
+
+# Reads SECRETS_FILE (.env format) without executing it. Only a variable's name
+# ever travels through Vigie; its value never leaves this server.
+# Values are kept in private, unexported variables (_VS_NAME): a TZ, PATH or HOME
+# line in a Docker .env must not change the environment of the task.
+v_load_secrets() {
+    [ -n "$SECRETS_FILE" ] || return 0
+    [ -r "$SECRETS_FILE" ] || { v_fail "secrets file not readable: $SECRETS_FILE"; return 1; }
+    while IFS= read -r _l || [ -n "$_l" ]; do
+        _l=${_l#export }
+        case $_l in ''|'#'*) continue ;; *=*) ;; *) continue ;; esac
+        _k=${_l%%=*}; _v=${_l#*=}
+        case $_k in ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+        case $_v in \"*\") _v=${_v#\"}; _v=${_v%\"} ;; \'*\') _v=${_v#\'}; _v=${_v%\'} ;; esac
+        eval "_VS_$_k=\$_v"
+    done < "$SECRETS_FILE"
+}
+
+v_secret() {   # variable name → value (after v_load_secrets)
+    case $1 in ''|[0-9]*|*[!A-Za-z0-9_]*) return 1 ;; esac
+    eval "printf '%s' \"\${_VS_$1:-}\""
+}
+
+v_fsize() { ls -ln "$1" 2>/dev/null | awk '{ print $5 }'; }
+v_hsize() {
+    awk -v b="${1:-0}" 'BEGIN { split("B KB MB GB TB", u, " "); i = 1
+        while (b >= 1024 && i < 5) { b /= 1024; i++ }
+        printf (i == 1 ? "%d %s" : "%.1f %s"), b, u[i] }'
+}
+
+v_keep_latest() {
+    [ "${3:-0}" -gt 0 ] 2>/dev/null || return 0
+    ls -1 "$1" 2>/dev/null | awk -v p="$2" 'index($0, p) == 1' | sort -r |
+        tail -n +"$(( $3 + 1 ))" |
+        while IFS= read -r _f; do rm -f "$1/$_f" && v_log "rotation: removed $_f from $1"; done
+}
+
+# Daily / weekly / monthly retention. Task parameters:
+# DAILY_DIR WEEKLY_DIR MONTHLY_DIR KEEP_DAILY KEEP_WEEKLY KEEP_MONTHLY.
+# Copies are hard links when possible, so they cost no extra space.
+v_gfs() {
+    _b=$1 _f=$2 _p=$3
+    _d=${DAILY_DIR:-daily} _w=${WEEKLY_DIR:-weekly} _m=${MONTHLY_DIR:-monthly}
+    if [ "$(date +%u)" = 1 ]; then
+        mkdir -p "$_b/$_w"
+        ln -f "$_b/$_d/$_f" "$_b/$_w/$_f" 2>/dev/null || cp "$_b/$_d/$_f" "$_b/$_w/"
+        v_log "weekly copy: $_w/$_f"
+    fi
+    if [ "$(date +%d)" = 01 ]; then
+        mkdir -p "$_b/$_m"
+        ln -f "$_b/$_d/$_f" "$_b/$_m/$_f" 2>/dev/null || cp "$_b/$_d/$_f" "$_b/$_m/"
+        v_log "monthly copy: $_m/$_f"
+    fi
+    v_keep_latest "$_b/$_d" "$_p" "${KEEP_DAILY:-7}"
+    v_keep_latest "$_b/$_w" "$_p" "${KEEP_WEEKLY:-4}"
+    v_keep_latest "$_b/$_m" "$_p" "${KEEP_MONTHLY:-12}"
+}
+
+# ── Parameters: declared in tasks, validated locally ────────────────────────
+# Task header:  # @param NAME | type | required|optional | Label | default
+
+task_params() {
+    awk -F'|' '/^# @param / { sub(/^# @param /, "")
+        for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
+        print $1 "|" $2 "|" $3 "|" $4 "|" $5 }' "$1"
+}
+
+# Same rules as the server (VIGIE_PARAM_TYPES): this is the last line of defence.
+v_valid() {
+    case $1 in
+        path)    _re='^/[A-Za-z0-9._/@+ -]*$' ;;
+        paths)   _re='^/[A-Za-z0-9._/@+-]*( /[A-Za-z0-9._/@+-]*)*$' ;;
+        name)    _re='^[A-Za-z0-9._-]{1,64}$' ;;
+        names)   _re='^[A-Za-z0-9._-]{1,64}( [A-Za-z0-9._-]{1,64})*$' ;;
+        varname) _re='^[A-Z_][A-Z0-9_]{0,63}$' ;;
+        int|service) _re='^[0-9]{1,9}$' ;;
+        bool)    _re='^(yes|no)$' ;;
+        *)       return 1 ;;
+    esac
+    printf '%s' "$2" | grep -Eq "$_re"
+}
+
+# Base64 decoding without the base64 command (missing from OpenWRT's busybox):
+# awk turns each byte into an octal escape, which printf outputs verbatim.
+# Only * / % are used, as busybox awk is often built without its math library.
+b64d() {
+    [ "$1" = - ] && return 0
+    if command -v base64 >/dev/null 2>&1; then
+        printf '%s' "$1" | base64 -d 2>/dev/null
+        return
+    fi
+    printf "$(printf '%s' "$1" | awk 'BEGIN {
+        a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        for (i = 0; i < 64; i++) v[substr(a, i + 1, 1)] = i }
+        {   s = $0; gsub(/[^A-Za-z0-9+\/=]/, "", s)
+            for (i = 1; i <= length(s); i += 4) {
+                n = 0; pad = 0
+                for (j = 0; j < 4; j++) {
+                    c = substr(s, i + j, 1)
+                    if (c == "=" || c == "") { pad++; n = n * 64 } else n = n * 64 + v[c]
+                }
+                b1 = int(n / 65536); b2 = int(n / 256) % 256; b3 = n % 256
+                printf "\\%03o", b1
+                if (pad < 2) printf "\\%03o", b2
+                if (pad < 1) printf "\\%03o", b3
+            }
+        }')"
+}
+
+# ── JSON and HTTP ───────────────────────────────────────────────────────────
+
+json_esc() {
+    tr -d '\000-\010\013\014\016-\037' | awk 'BEGIN { ORS = "" } {
+        gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); sub(/\r$/, "")
+        if (NR > 1) print "\\n"; print }'
+}
+js() { printf '%s' "$1" | json_esc; }
+json_list() {   # lines on stdin → ["a","b"]
+    printf '['
+    _first=1
+    while IFS= read -r _l; do
+        [ -n "$_l" ] || continue
+        [ $_first = 1 ] || printf ','
+        _first=0
+        printf '"%s"' "$(js "$_l")"
+    done
+    printf ']'
+}
+
+# HTTP client: curl if it actually works, otherwise wget / uclient-fetch (OpenWRT).
+# A curl binary that cannot start (library mismatch after a partial upgrade) is skipped.
+http_client() {
+    [ -n "${HTTP_CLIENT:-}" ] && return 0
+    if command -v curl >/dev/null 2>&1 && curl --version >/dev/null 2>&1; then HTTP_CLIENT=curl
+    elif command -v wget >/dev/null 2>&1 && wget --help >/dev/null 2>&1; then HTTP_CLIENT=wget
+    elif command -v uclient-fetch >/dev/null 2>&1; then HTTP_CLIENT=uclient-fetch
+    else die "no working HTTP client: install curl, wget or uclient-fetch"
+    fi
+}
+
+http_post() {   # url request_file [response_file]
+    _out=${3:-/dev/null}
+    http_client
+    case $HTTP_CLIENT in
+        curl) curl -fsS -m 30 -H 'Content-Type: application/json' --data-binary "@$2" -o "$_out" "$1" ;;
+        *)    "$HTTP_CLIENT" -q -T 30 -O "$_out" --post-data="$(cat "$2")" "$1" ;;
+    esac
+}
+
+facts_json() {
+    if [ -r /etc/openwrt_release ]; then
+        _os=$( . /etc/openwrt_release; echo "${DISTRIB_DESCRIPTION:-OpenWrt}" )
+    elif [ -r /etc/os-release ]; then
+        _os=$( . /etc/os-release; echo "${PRETTY_NAME:-Linux}" )
+    else
+        _os=$(uname -s)
+    fi
+    printf '{"hostname":"%s","os":"%s","kernel":"%s","arch":"%s","agent_version":"%s",' \
+        "$(js "$(cat /proc/sys/kernel/hostname 2>/dev/null)")" "$(js "$_os")" \
+        "$(js "$(uname -r)")" "$(js "$(uname -m)")" "$VIGIE_AGENT_VERSION"
+    # User running the agent: most tasks need root (docker, mdadm, borg, reboot…)
+    printf '"user":"%s",' "$(js "$(id -un 2>/dev/null || id -u)")"
+    # Boot time: shows in Vigie that a server has actually rebooted
+    printf '"boot_time":%s,' "$(awk '/^btime/ { print $2 }' /proc/stat 2>/dev/null | grep -E '^[0-9]+$' || echo null)"
+    printf '"commands":%s,' "$(for c in docker rsync borg mdadm sysupgrade tar gzip curl; do
+        command -v "$c" >/dev/null 2>&1 && echo "$c"; done | json_list)"
+    printf '"mounts":%s,' "$(awk '$3 !~ /^(proc|sysfs|tmpfs|devtmpfs|devpts|cgroup2?|overlay|squashfs|debugfs|tracefs|securityfs|pstore|bpf|mqueue|hugetlbfs|fusectl|configfs|autofs|binfmt_misc|nsfs|ramfs|efivarfs|rpc_pipefs|fuse\..*|nfsd|selinuxfs)$/ { print $2 }' /proc/mounts | sort -u | json_list)"
+    printf '"containers":%s,' "$(docker ps --format '{{.Names}}' 2>/dev/null | sort | json_list)"
+    printf '"secret_names":%s}' "$( [ -r "$SECRETS_FILE" ] &&
+        sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$SECRETS_FILE" | sort -u | json_list || printf '[]')"
+}
+
+catalog_json() {
+    printf '['
+    _first=1
+    for _f in "$TASKS_DIR"/*.sh; do
+        [ -e "$_f" ] || continue
+        is_superseded "$_f" && continue
+        [ $_first = 1 ] || printf ','
+        _first=0
+        (
+            TASK_DESC=; TASK_MAX_AGE=1560; TASK_MAX_RUNTIME=60
+            . "$_f"
+            printf '{"name":"%s","descr":"%s","max_age":%s,"max_runtime":%s,"params":[' \
+                "$(basename "$_f" .sh)" "$(js "$TASK_DESC")" "$TASK_MAX_AGE" "$TASK_MAX_RUNTIME"
+            _pf=1
+            task_params "$_f" | while IFS='|' read -r _n _t _r _lab _def; do
+                [ $_pf = 1 ] || printf ','
+                _pf=0
+                printf '{"name":"%s","type":"%s","required":%s,"label":"%s","default":"%s"}' \
+                    "$_n" "$_t" "$( [ "$_r" = required ] && echo true || echo false )" \
+                    "$(js "$_lab")" "$(js "$_def")"
+            done
+            printf ']}'
+        )
+    done
+    printf ']'
+}
+
+need_enrolled() {
+    [ -n "$VIGIE_URL" ] && [ -n "$AGENT_TOKEN" ] || die "agent not enrolled (see \"vigie enroll\")"
+}
+
+# ── Run reports ─────────────────────────────────────────────────────────────
+
+metrics_json() {
+    printf '{'
+    _first=1
+    if [ -s "$RUN_TMP/metrics" ]; then
+        while IFS= read -r _l; do
+            _k=${_l%%=*}; _v=${_l#*=}
+            [ $_first = 1 ] || printf ','
+            _first=0
+            if printf '%s' "$_v" | grep -Eq '^-?[0-9]+(\.[0-9]+)?$'; then
+                printf '"%s":%s' "$(js "$_k")" "$_v"
+            else
+                printf '"%s":"%s"' "$(js "$_k")" "$(js "$_v")"
+            fi
+        done < "$RUN_TMP/metrics"
+    fi
+    printf '}'
+}
+
+summary_text() {
+    if [ "${1:-}" = error ] && [ -s "$RUN_TMP/errors" ]; then head -n 1 "$RUN_TMP/errors"
+    elif [ -s "$RUN_TMP/summary" ];  then cat "$RUN_TMP/summary"
+    elif [ -s "$RUN_TMP/errors" ];   then head -n 1 "$RUN_TMP/errors"
+    elif [ -s "$RUN_TMP/warnings" ]; then head -n 1 "$RUN_TMP/warnings"
+    elif [ "${1:-}" = error ];       then echo "Failed (exit code ${RC:-?}), see the log"
+    fi
+}
+
+build_payload() {
+    _st=$1; _now=$(date +%s); _fin=null; _dur=null; _rc=null
+    if [ "$_st" != running ]; then _fin=$_now; _dur=$(( _now - START )); _rc=${RC:-null}; fi
+    printf '{"token":"%s","service_id":%s,"job_id":%s,"run_id":"%s","status":"%s",' \
+        "$AGENT_TOKEN" "$SVC_ID" "${JOB_ID:-null}" "$RUN_ID" "$_st"
+    printf '"started_at":%s,"finished_at":%s,"duration":%s,"exit_code":%s,"heartbeat":%s,' \
+        "$START" "$_fin" "$_dur" "$_rc" "$HEARTBEAT_SEC"
+    printf '"summary":"%s","metrics":%s,"log_tail":"%s"}\n' \
+        "$(summary_text "$_st" | json_esc)" "$(metrics_json)" \
+        "$(tail -n "$LOG_TAIL_LINES" "$RUN_LOG" 2>/dev/null | json_esc)"
+}
+
+report() {   # status tmp_file
+    [ -n "$VIGIE_URL" ] && [ -n "$AGENT_TOKEN" ] || return 0
+    build_payload "$1" > "$2" || return 1
+    http_post "$VIGIE_URL/api/agent/report" "$2" 2>/dev/null && return 0
+    if [ "$1" != running ]; then
+        mkdir -p "$STATE_DIR/spool"
+        mv "$2" "$STATE_DIR/spool/$(date +%s)-$SVC_ID-$RUN_ID.json"
+        echo "vigie: Vigie unreachable, report queued" >&2
+    fi
+    return 1
+}
+
+flush_spool() {
+    [ -n "$VIGIE_URL" ] && [ -d "$STATE_DIR/spool" ] || return 0
+    # A rejected report (service deleted meanwhile) must not block the queue forever
+    find "$STATE_DIR/spool" -name '*.json' -mtime +7 -exec rm -f {} + 2>/dev/null
+    for _f in "$STATE_DIR"/spool/*.json; do
+        [ -e "$_f" ] || break
+        if http_post "$VIGIE_URL/api/agent/report" "$_f" 2>/dev/null; then rm -f "$_f"; else break; fi
+    done
+}
+
+acquire_lock() {   # name
+    LOCK="$STATE_DIR/lock/$1"
+    mkdir -p "$STATE_DIR/lock"
+    if mkdir "$LOCK" 2>/dev/null; then echo $$ > "$LOCK/pid"; return 0; fi
+    _pid=$(cat "$LOCK/pid" 2>/dev/null)
+    if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then LOCK_PID=$_pid; return 1; fi
+    rm -rf "$LOCK"                                   # stale lock (reboot, kill -9)
+    mkdir "$LOCK" 2>/dev/null && echo $$ > "$LOCK/pid"
+}
+
+cleanup() {
+    [ -n "${HB_PID:-}" ]   && kill "$HB_PID" 2>/dev/null
+    [ -n "${TAIL_PID:-}" ] && kill "$TAIL_PID" 2>/dev/null
+    [ -n "${RUN_TMP:-}" ]  && rm -rf "$RUN_TMP"
+    [ "${LOCKED:-0}" = 1 ] && rm -rf "$LOCK"
+}
+
+# ── Loading a task and a service ────────────────────────────────────────────
+
+# A task file under a former name, left next to its renamed version, is ignored.
+is_superseded() {
+    _n=$(basename "$1" .sh)
+    [ "$(task_name "$_n")" != "$_n" ] && [ -f "$TASKS_DIR/$(task_name "$_n").sh" ]
+}
+
+# Renamed tasks: a service still recorded under a former name keeps working.
+task_name() {
+    case $1 in
+        library-sync)   echo folder-sync ;;
+        nextcloud-borg) echo backup-borg ;;
+        mariadb-dump)   echo db-dump ;;
+        *)              echo "$1" ;;
+    esac
+}
+
+load_task() {
+    case $1 in ''|*[!a-z0-9-]*) die "invalid task name: '$1'" ;; esac
+    TASK=$(task_name "$1")
+    TASK_FILE="$TASKS_DIR/$TASK.sh"
+    [ -r "$TASK_FILE" ] || die "task not available on this agent: $TASK"
+    TASK_DESC=$TASK; TASK_MAX_AGE=1560; TASK_MAX_RUNTIME=60
+    unset -f task_run task_check 2>/dev/null
+    . "$TASK_FILE"
+}
+
+# A service file only holds lines already validated during sync:
+# @meta=value, then NAME=value for the parameters declared by the task.
+load_service() {
+    case ${1:-} in ''|*[!0-9]*) die "invalid service id: '${1:-}'" ;; esac
+    SVC_ID=$1
+    SVC_FILE="$SVC_DIR/$SVC_ID.svc"
+    [ -r "$SVC_FILE" ] || die "service $SVC_ID unknown on this server (run \"vigie sync\")"
+    SVC_TASK=$(sed -n 's/^@task=//p' "$SVC_FILE")
+    SVC_NAME=$(sed -n 's/^@name=//p' "$SVC_FILE")
+    load_task "$SVC_TASK"
+    # Declared defaults first, then the service's own values
+    while IFS='|' read -r _n _t _r _lab _def; do
+        [ -n "$_n" ] && export "$_n=$_def"
+    done <<EOF
+$(task_params "$TASK_FILE")
+EOF
+    while IFS= read -r _l; do
+        case $_l in @*|'') continue ;; esac
+        export "${_l%%=*}=${_l#*=}"
+    done < "$SVC_FILE"
+}
+
+parse_job_opt() {   # --job N
+    JOB_ID=
+    if [ "${1:-}" = --job ]; then
+        case ${2:-} in ''|*[!0-9]*) die "invalid request id" ;; esac
+        JOB_ID=$2
+    fi
+}
+
+# Service ids in the order set in Vigie; services missing from the order file
+# (written by an older agent) come last, by id.
+service_ids() {
+    {
+        [ -f "$STATE_DIR/services.order" ] && cat "$STATE_DIR/services.order"
+        for _f in "$SVC_DIR"/*.svc; do [ -e "$_f" ] && basename "$_f" .svc; done | sort -n
+    } | awk '!seen[$0]++' | while IFS= read -r _id; do
+        [ -f "$SVC_DIR/$_id.svc" ] && echo "$_id"
+    done
+}
+
+# ── Commands ────────────────────────────────────────────────────────────────
+
+cmd_run() {
+    load_service "${1:-}"; shift
+    parse_job_opt "$@"
+
+    mkdir -p "$STATE_DIR/logs/$SVC_ID" "$STATE_DIR/last" "$STATE_DIR/run" || die "STATE_DIR not usable: $STATE_DIR"
+    START=$(date +%s)
+    RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+    RUN_TMP="$STATE_DIR/run/$SVC_ID.$$"
+    RUN_LOG="$STATE_DIR/logs/$SVC_ID/$RUN_ID.log"
+    RC= ; HB_PID= ; TAIL_PID= ; TASK_PID= ; LOCKED=0 ; INTERRUPTED=
+    mkdir -p "$RUN_TMP"
+    trap cleanup EXIT
+
+    if ! acquire_lock "svc-$SVC_ID"; then
+        echo "vigie: service $SVC_ID is already running (pid $LOCK_PID), skipped" >&2
+        exit 0
+    fi
+    LOCKED=1
+    flush_spool
+    echo "=== $SVC_NAME ($TASK) on $(cat /proc/sys/kernel/hostname), started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$RUN_LOG"
+    [ -n "$JOB_ID" ] && echo "request $JOB_ID from Vigie" >> "$RUN_LOG"
+    # Interactive run: show the log live
+    if [ -t 1 ]; then tail -n +1 -f "$RUN_LOG" & TAIL_PID=$!; fi
+
+    report running "$RUN_TMP/hb.json"
+    ( while sleep "$HEARTBEAT_SEC"; do report running "$RUN_TMP/hb.json"; done ) >/dev/null 2>&1 &
+    HB_PID=$!
+
+    trap 'INTERRUPTED=1; [ -n "$TASK_PID" ] && kill "$TASK_PID" 2>/dev/null' INT TERM HUP
+    ( task_run ) >> "$RUN_LOG" 2>&1 &
+    TASK_PID=$!
+    wait "$TASK_PID"; RC=$?
+    if [ -n "$INTERRUPTED" ]; then
+        wait "$TASK_PID" 2>/dev/null
+        v_fail "run interrupted by a signal" >> "$RUN_LOG"
+        RC=130
+    fi
+    trap - INT TERM HUP
+
+    kill "$HB_PID" 2>/dev/null; HB_PID=
+    _dur=$(( $(date +%s) - START ))
+    echo "=== finished $(date '+%Y-%m-%d %H:%M:%S'), exit code $RC, duration ${_dur}s ===" >> "$RUN_LOG"
+    [ -n "$TAIL_PID" ] && { sleep 1; kill "$TAIL_PID" 2>/dev/null; TAIL_PID=; }
+
+    if   [ "$RC" -ne 0 ];            then STATUS=error
+    elif [ -s "$RUN_TMP/errors" ];   then STATUS=error
+    elif [ -s "$RUN_TMP/warnings" ]; then STATUS=warning
+    else                                  STATUS=success
+    fi
+
+    report "$STATUS" "$RUN_TMP/final.json"
+    printf '%s\t%s\t%ss\t%s\n' "$STATUS" "$(date '+%Y-%m-%d %H:%M')" "$_dur" \
+        "$(summary_text "$STATUS" | head -n 1)" > "$STATE_DIR/last/$SVC_ID"
+    ls -1 "$STATE_DIR/logs/$SVC_ID" | sort -r | tail -n +"$(( LOG_KEEP + 1 ))" |
+        while IFS= read -r _f; do rm -f "$STATE_DIR/logs/$SVC_ID/$_f"; done
+
+    [ "$STATUS" = error ] && exit 1
+    exit 0
+}
+
+cmd_check() {
+    load_service "${1:-}"; shift
+    parse_job_opt "$@"
+    mkdir -p "$STATE_DIR/run"
+    RUN_TMP="$STATE_DIR/run/check-$SVC_ID.$$"
+    RUN_LOG="$RUN_TMP/check.log"
+    mkdir -p "$RUN_TMP"
+    trap 'rm -rf "$RUN_TMP"' EXIT
+
+    {
+        echo "Checking \"$SVC_NAME\" ($TASK) on $(cat /proc/sys/kernel/hostname)"
+        if command -v task_check >/dev/null 2>&1; then
+            ( task_check )
+        else
+            v_log "this task defines no specific check"
+        fi
+    } > "$RUN_LOG" 2>&1
+    _rc=$?
+    if [ $_rc -eq 0 ] && [ ! -s "$RUN_TMP/errors" ]; then
+        _ok=true; echo "=> ready to be scheduled" >> "$RUN_LOG"
+    else
+        _ok=false; echo "=> check failed" >> "$RUN_LOG"
+    fi
+    cat "$RUN_LOG"
+
+    if [ -n "$JOB_ID" ] && [ -n "$VIGIE_URL" ]; then
+        printf '{"token":"%s","job_id":%s,"ok":%s,"output":"%s"}' "$AGENT_TOKEN" "$JOB_ID" "$_ok" \
+            "$(tail -n 200 "$RUN_LOG" | json_esc)" > "$RUN_TMP/job.json"
+        http_post "$VIGIE_URL/api/agent/job" "$RUN_TMP/job.json" || echo "vigie: result not sent" >&2
+    fi
+    [ "$_ok" = true ]
+}
+
+# Cron expression for the sync. A per-host offset keeps all agents from
+# contacting Vigie at the same minute.
+poll_cron() {
+    _i=$1
+    _o=$(awk 'BEGIN { for (i = 32; i < 127; i++) ord[sprintf("%c", i)] = i }
+        { for (i = 1; i <= length($0); i++) s += ord[substr($0, i, 1)] * i } END { print s % 60 }' \
+        /proc/sys/kernel/hostname 2>/dev/null)
+    case $_o in ''|*[!0-9]*) _o=0 ;; esac
+    if   [ "$_i" -le 1 ];    then echo '* * * * *'
+    elif [ "$_i" -lt 60 ];   then echo "$(( _o % _i ))-59/$_i * * * *"
+    elif [ "$_i" -eq 60 ];   then echo "$_o * * * *"
+    elif [ "$_i" -lt 1440 ]; then echo "$_o */$(( _i / 60 )) * * *"
+    else                          echo "$_o 4 * * *"
+    fi
+}
+
+# Replaces the block managed by Vigie in the crontab of the user running the agent,
+# only when it differs from the block actually installed. The actual crontab is
+# the reference, never a cached copy: the block may have been removed by hand,
+# or the agent may now run as another user (root instead of a regular account).
+cron_apply() {
+    _new=$1
+    crontab -l 2>/dev/null > "$_new.full.cur"
+    awk '/^# >>> vigie/ { on = 1; next } /^# <<< vigie/ { on = 0; next } on' "$_new.full.cur" > "$_new.installed"
+    if grep -q '^# >>> vigie' "$_new.full.cur" && [ "$(cat "$_new")" = "$(cat "$_new.installed")" ]; then
+        return 0
+    fi
+    {
+        awk '/^# >>> vigie/ { skip = 1; next } /^# <<< vigie/ { skip = 0; next } !skip' "$_new.full.cur"
+        echo "# >>> vigie: block managed automatically, do not edit"
+        cat "$_new"
+        echo "# <<< vigie"
+    } > "$_new.full"
+    crontab "$_new.full" || { echo "vigie: could not update the crontab" >&2; return 1; }
+    cp "$_new" "$STATE_DIR/crontab.block"      # for information only
+}
+
+# Checks a received service: task present, parameters declared and well formed,
+# required ones set, valid schedule. Prints the reason for a rejection.
+validate_service() {
+    _f=$1
+    _task=$(task_name "$(sed -n 's/^@task=//p' "$_f")")
+    [ -r "$TASKS_DIR/$_task.sh" ] || { echo "task \"$_task\" not available on this agent"; return 1; }
+    _sched=$(sed -n 's/^@schedule=//p' "$_f")
+    if [ -n "$_sched" ] && ! printf '%s' "$_sched" | grep -Eq '^([0-9*,/-]+ ){4}[0-9*,/-]+$'; then
+        echo "invalid schedule: $_sched"; return 1
+    fi
+    _decl=$(task_params "$TASKS_DIR/$_task.sh")
+    while IFS= read -r _l; do
+        case $_l in @*|'') continue ;; esac
+        _k=${_l%%=*}; _v=${_l#*=}
+        _d=$(printf '%s\n' "$_decl" | awk -F'|' -v k="$_k" '$1 == k')
+        [ -n "$_d" ] || { echo "parameter not declared by $_task: $_k"; return 1; }
+        _t=$(printf '%s' "$_d" | cut -d'|' -f2)
+        [ -z "$_v" ] || v_valid "$_t" "$_v" || { echo "$_k: value rejected for type $_t"; return 1; }
+    done < "$_f"
+    printf '%s\n' "$_decl" | while IFS='|' read -r _n _t _r _lab _def; do
+        [ "$_r" = required ] || continue
+        grep -q "^$_n=." "$_f" || [ -n "$_def" ] || { echo "$_n is required but missing"; exit 1; }
+    done
+}
+
+cmd_sync() {
+    need_enrolled
+    mkdir -p "$STATE_DIR/run" "$SVC_DIR"
+    acquire_lock sync || exit 0
+    LOCKED=1
+    RUN_TMP="$STATE_DIR/run/sync.$$"
+    mkdir -p "$RUN_TMP"
+    trap cleanup EXIT
+
+    _errors="$STATE_DIR/sync.errors"
+    printf '{"token":"%s","version":"%s","facts":%s,"catalog":%s,"errors":%s}' \
+        "$AGENT_TOKEN" "$VIGIE_AGENT_VERSION" "$(facts_json)" "$(catalog_json)" \
+        "$( [ -f "$_errors" ] && json_list < "$_errors" || printf '[]')" > "$RUN_TMP/req.json"
+    if ! http_post "$VIGIE_URL/api/agent/sync" "$RUN_TMP/req.json" "$RUN_TMP/resp"; then
+        echo "vigie: sync failed, the local configuration stays in place" >&2
+        exit 1
+    fi
+    if [ "$(head -n 1 "$RUN_TMP/resp")" != "vigie 1" ] || [ "$(tail -n 1 "$RUN_TMP/resp")" != end ]; then
+        echo "vigie: incomplete response from Vigie, ignored" >&2
+        exit 1
+    fi
+
+    _new="$RUN_TMP/services"; mkdir -p "$_new"
+    : > "$RUN_TMP/jobs"; : > "$RUN_TMP/errors.new"; : > "$RUN_TMP/order"
+    _interval=15; _fast=0; _now=$(date +%s)
+    while read -r _kind _a _b _c _d _e _f _g; do
+        case $_kind in
+            server_time) _now=$_a ;;
+            interval)    _interval=$_a ;;
+            fast_until)  _fast=$_a ;;
+            service)
+                case $_a in ''|*[!0-9]*) continue ;; esac
+                echo "$_a" >> "$RUN_TMP/order"          # Vigie sends services in crontab order
+                {
+                    echo "@enabled=$_b"
+                    echo "@task=$(b64d "$_c")"
+                    echo "@name=$(b64d "$_d" | tr -d '\n')"
+                    echo "@schedule=$(b64d "$_e" | tr -d '\n')"
+                } > "$_new/$_a.svc" ;;
+            param)
+                case $_a in ''|*[!0-9]*) continue ;; esac
+                [ -f "$_new/$_a.svc" ] || continue
+                case $_b in ''|[0-9]*|*[!A-Z0-9_]*) continue ;; esac
+                printf '%s=%s\n' "$_b" "$(b64d "$_c" | tr -d '\n')" >> "$_new/$_a.svc" ;;
+            job)
+                case "$_a$_c" in *[!0-9]*) continue ;; esac
+                case $_b in check|run) echo "$_a $_b $_c" >> "$RUN_TMP/jobs" ;; esac ;;
+        esac
+    done < "$RUN_TMP/resp"
+
+    for _f in "$_new"/*.svc; do
+        [ -e "$_f" ] || break
+        if ! _why=$(validate_service "$_f"); then
+            _id=$(basename "$_f" .svc)
+            echo "service $_id rejected by the agent: $_why" | tee -a "$RUN_TMP/errors.new" >&2
+            rm -f "$_f"
+        fi
+    done
+    mv "$RUN_TMP/errors.new" "$_errors"
+
+    rm -rf "$SVC_DIR.old"
+    mv "$SVC_DIR" "$SVC_DIR.old" && mv "$_new" "$SVC_DIR" && rm -rf "$SVC_DIR.old"
+    mv "$RUN_TMP/order" "$STATE_DIR/services.order"
+
+    case $_interval in ''|*[!0-9]*) _interval=15 ;; esac
+    [ "${_fast:-0}" -gt "$_now" ] 2>/dev/null && _interval=1
+    {
+        echo "$(poll_cron "$_interval") '$VIGIE_BIN' sync >/dev/null 2>&1"
+        # Quick check every minute, useless while every minute is already a full sync
+        [ "$POLL" = yes ] && [ "$_interval" -gt 1 ] && echo "* * * * * '$VIGIE_BIN' poll >/dev/null 2>&1"
+        service_ids | while IFS= read -r _id; do
+            _f="$SVC_DIR/$_id.svc"
+            grep -q '^@enabled=1$' "$_f" || continue
+            _sched=$(sed -n 's/^@schedule=//p' "$_f")
+            [ -n "$_sched" ] && echo "$_sched '$VIGIE_BIN' run $_id >/dev/null 2>&1"
+        done
+    } > "$RUN_TMP/cron"
+    cron_apply "$RUN_TMP/cron"
+    date '+%Y-%m-%d %H:%M:%S' > "$STATE_DIR/last-sync"
+
+    # Requests from Vigie run in the background: the sync does not wait for them
+    while read -r _jid _kind _sid; do
+        [ -f "$SVC_DIR/$_sid.svc" ] || continue
+        "$VIGIE_BIN" "$_kind" "$_sid" --job "$_jid" </dev/null >/dev/null 2>&1 &
+    done < "$RUN_TMP/jobs"
+    exit 0
+}
+
+# Quick check (every minute): one tiny request. A full sync only happens when
+# Vigie has something for this server (a test, a run, a change).
+cmd_poll() {
+    need_enrolled
+    mkdir -p "$STATE_DIR/run"
+    _t="$STATE_DIR/run/poll.$$"
+    trap 'rm -f "$_t.req" "$_t.resp"' EXIT
+    printf '{"token":"%s"}' "$AGENT_TOKEN" > "$_t.req"
+    http_post "$VIGIE_URL/api/agent/poll" "$_t.req" "$_t.resp" 2>/dev/null || exit 0
+    grep -q '^sync 1$' "$_t.resp" || exit 0
+    rm -f "$_t.req" "$_t.resp"; trap - EXIT
+    cmd_sync
+}
+
+cmd_enroll() {
+    _url=${1:-}; _code=${2:-}
+    [ -n "$_url" ] && [ -n "$_code" ] || die "usage: vigie enroll <url> <code>"
+    case $_url in http://*|https://*) ;; *) die "the URL must start with http:// or https://" ;; esac
+    case $_code in *[!A-Za-z0-9-]*) die "invalid enrolment code" ;; esac
+    _url=${_url%/}
+    if [ "$(id -u)" != 0 ]; then
+        echo "vigie: warning: running as $(id -un), not root. The crontab of this user will be used," >&2
+        echo "       and most tasks (docker, mdadm, borg, reboot…) will fail. Use sudo." >&2
+    fi
+    mkdir -p "$STATE_DIR/run" || die "STATE_DIR not usable: $STATE_DIR"
+    _t="$STATE_DIR/run/enroll.$$"
+    mkdir -p "$_t"; trap 'rm -rf "$_t"' EXIT
+
+    printf '{"code":"%s","version":"%s","facts":%s,"catalog":%s}' \
+        "$_code" "$VIGIE_AGENT_VERSION" "$(facts_json)" "$(catalog_json)" > "$_t/req.json"
+    http_post "$_url/api/agent/enroll" "$_t/req.json" "$_t/resp" ||
+        die "enrolment failed: Vigie unreachable at $_url, or code expired / already used (HTTP client: $HTTP_CLIENT)"
+    _token=$(sed -n 's/^token \([0-9a-f]\{64\}\)$/\1/p' "$_t/resp")
+    _name=$(b64d "$(sed -n 's/^server //p' "$_t/resp")")
+    [ -n "$_token" ] || die "unexpected enrolment response"
+
+    # Update vigie.conf: replace the two lines managed by enrolment
+    grep -v -e '^VIGIE_URL=' -e '^AGENT_TOKEN=' "$VIGIE_CONF" > "$_t/conf"
+    { cat "$_t/conf"; echo "VIGIE_URL=\"$_url\""; echo "AGENT_TOKEN=\"$_token\""; } > "$VIGIE_CONF"
+    chmod 600 "$VIGIE_CONF"
+    echo "Server enrolled as \"$_name\". First sync…"
+    VIGIE_URL=$_url; AGENT_TOKEN=$_token
+    trap - EXIT; rm -rf "$_t"
+    cmd_sync
+}
+
+cmd_list() {
+    printf '  %-5s %-18s %-16s %-8s %s\n' ID TASK SCHEDULE ENABLED NAME
+    _ids=$(service_ids)
+    [ -n "$_ids" ] || echo "  no services (run \"vigie sync\")"
+    for _id in $_ids; do
+        _f="$SVC_DIR/$_id.svc"
+        printf '  %-5s %-18s %-16s %-8s %s\n' "$(basename "$_f" .svc)" \
+            "$(sed -n 's/^@task=//p' "$_f")" "$(sed -n 's/^@schedule=//p' "$_f" | sed 's/^$/-/')" \
+            "$(grep -q '^@enabled=1$' "$_f" && echo yes || echo no)" "$(sed -n 's/^@name=//p' "$_f")"
+    done
+    [ -s "$STATE_DIR/sync.errors" ] && { echo; sed 's/^/  REJECTED: /' "$STATE_DIR/sync.errors"; }
+    echo; echo "  last sync: $(cat "$STATE_DIR/last-sync" 2>/dev/null || echo never)"
+}
+
+cmd_tasks() {
+    for _f in "$TASKS_DIR"/*.sh; do
+        [ -e "$_f" ] || continue
+        is_superseded "$_f" && { echo "$(basename "$_f" .sh)  (former name, replaced by $(task_name "$(basename "$_f" .sh)"): this file can be deleted)"; continue; }
+        ( TASK_DESC=; . "$_f"; echo "$(basename "$_f" .sh)  $TASK_DESC" )
+        task_params "$_f" | while IFS='|' read -r _n _t _r _lab _def; do
+            printf '    %-16s %-8s %-9s %s%s\n' "$_n" "$_t" "$_r" "$_lab" "${_def:+ [default: $_def]}"
+        done
+    done
+}
+
+cmd_status() {
+    for _f in "$STATE_DIR"/last/*; do
+        [ -e "$_f" ] || { echo "no run recorded yet"; return; }
+        _id=$(basename "$_f")
+        printf '  %-5s %-28s ' "$_id" "$(sed -n 's/^@name=//p' "$SVC_DIR/$_id.svc" 2>/dev/null | cut -c1-28)"
+        awk -F'\t' '{ printf "%-8s %s  %-7s %s\n", $1, $2, $3, $4 }' "$_f"
+    done
+}
+
+case ${1:-} in
+    enroll) shift; cmd_enroll "$@" ;;
+    sync)   cmd_sync ;;
+    poll)   cmd_poll ;;
+    run)    shift; cmd_run "$@" ;;
+    check)  shift; cmd_check "$@" ;;
+    list)   cmd_list ;;
+    tasks)  cmd_tasks ;;
+    status) cmd_status ;;
+    *)      sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

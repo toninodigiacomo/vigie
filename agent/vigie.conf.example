@@ -1,0 +1,12 @@
+# vigie.conf — local agent configuration (next to the "vigie" script).
+# Only these settings live on the server; services come from Vigie.
+# VIGIE_URL and AGENT_TOKEN are added automatically by "vigie enroll".
+
+# Local state. On OpenWRT, use a path on disk: /var is in RAM.
+STATE_DIR="/var/lib/vigie"
+
+# Passwords and passphrases: read here, never sent to Vigie
+SECRETS_FILE="/root/.env"
+
+HEARTBEAT_SEC=300                    # "running" signal during long tasks
+# POLL=no                            # disable the quick check every minute (tests then wait for the next sync)

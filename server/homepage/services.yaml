@@ -1,0 +1,39 @@
+# Snippet to paste into Homepage's services.yaml.
+# Read key: HOMEPAGE_VAR_VIGIE_KEY=<value of VIGIE_READ_TOKEN> in Homepage's environment.
+# Add &lang=fr (or ?lang=fr) to the URLs for French labels; the default is English.
+- Infrastructure:
+    - Vigie:
+        icon: https://vigie.example.com/icon-192.png   # Vigie's logo (or: mdi-shield-check)
+        href: https://vigie.example.com
+        description: Backups and scheduled tasks
+        siteMonitor: http://212-vigie/api/homepage
+        widgets:
+          - type: customapi
+            url: http://212-vigie/api/homepage
+            refreshInterval: 60000
+            headers:
+              X-API-Key: "{{HOMEPAGE_VAR_VIGIE_KEY}}"
+            mappings:
+              - field: status
+                label: Status
+              - field: ok
+                label: OK
+                format: number
+              - field: running
+                label: Running
+                format: number
+              - field: issues
+                label: To check
+                format: number
+          - type: customapi
+            url: http://212-vigie/api/homepage?filter=active
+            refreshInterval: 60000
+            headers:
+              X-API-Key: "{{HOMEPAGE_VAR_VIGIE_KEY}}"
+            display: dynamic-list
+            mappings:
+              items: items
+              name: name
+              label: label
+              limit: 6
+              target: "https://vigie.example.com/#{anchor}"

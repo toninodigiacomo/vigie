@@ -1,0 +1,1598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>Vigie</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="vendor/qrcode.js"></script>
+<style>
+:root {
+  --paper: #EEF1F3; --surface: #F8FAFB; --field: #FFFFFF; --ink: #17212B; --muted: #5D6B78; --line: #D5DBE0;
+  --ok: #2E7A58; --warn: #A5650F; --err: #B53A27; --run: #2D5FA8; --idle: #B9C2CA;
+  --ok-bg: #E1EEE7; --warn-bg: #F5EAD8; --err-bg: #F6E1DC; --run-bg: #DFE8F5;
+  --font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #151B21; --surface: #1C242C; --field: #111820; --ink: #E3E8EC; --muted: #93A1AD; --line: #2B3640;
+    --ok: #52B489; --warn: #DDA044; --err: #EE7461; --run: #73A2EA; --idle: #3A4652;
+    --ok-bg: #1D3329; --warn-bg: #362B18; --err-bg: #3A221D; --run-bg: #1E2C40;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 0.9375rem/1.5 var(--font); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 68rem; margin: 0 auto; padding: 1.25rem clamp(1rem, 4vw, 2.5rem) 4rem; }
+a { color: inherit; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; border-radius: 4px; }
+[hidden] { display: none !important; }
+
+/* Header and navigation */
+.top { display: flex; align-items: center; gap: 1.5rem; padding-bottom: 1rem; flex-wrap: wrap; }
+.brand { display: flex; align-items: flex-end; gap: .5rem; font-weight: 700; font-size: 1.05rem; letter-spacing: -.01em; text-decoration: none; }
+nav.main { display: flex; gap: .25rem; flex-wrap: wrap; }
+nav.main a { text-decoration: none; padding: .3rem .65rem; border-radius: 6px; color: var(--muted); }
+nav.main a:hover { color: var(--ink); background: var(--surface); }
+nav.main a[aria-current="page"] { color: var(--ink); background: var(--surface); box-shadow: inset 0 -2px 0 var(--ink); }
+.top .right { margin-left: auto; display: flex; align-items: center; gap: .75rem; color: var(--muted); font-size: .85rem; }
+
+/* Buttons and fields */
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: .45rem .9rem; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: .4rem; line-height: 1.3; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 700; }
+.btn.primary:hover { opacity: .9; }
+.btn.danger { color: var(--err); }
+.btn.small { padding: .25rem .6rem; font-size: .85rem; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.actions { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-top: 1.25rem; }
+form.stack, .stack { display: grid; gap: 1rem; max-width: 36rem; }
+.field { display: grid; gap: .3rem; }
+.field label { font-weight: 700; font-size: .9rem; }
+.field label .opt { font-weight: 400; color: var(--muted); }
+.field .help { color: var(--muted); font-size: .82rem; }
+.field .tech { font-family: var(--mono); font-size: .75rem; color: var(--muted); font-weight: 400; margin-left: .35rem; }
+input[type=text], input[type=password], input[type=number], select {
+  width: 100%; padding: .5rem .65rem; border: 1px solid var(--line); border-radius: 6px; background: var(--field);
+}
+input:focus, select:focus { border-color: var(--run); outline: none; box-shadow: 0 0 0 3px var(--run-bg); }
+input.code { font-family: var(--mono); font-size: 1.3rem; letter-spacing: .25em; max-width: 12rem; text-align: center; }
+.msg { padding: .7rem .9rem; border-radius: 8px; margin: 0 0 1rem; max-width: 46rem; }
+.msg.err { background: var(--err-bg); color: var(--err); }
+.msg.ok { background: var(--ok-bg); color: var(--ok); }
+.msg.info { background: var(--run-bg); color: var(--run); }
+
+/* Page titles */
+.page-head { padding: 2rem 0 1.25rem; border-bottom: 1px solid var(--line); margin-bottom: 1.5rem; }
+.page-head h1 { margin: 0; font-size: clamp(1.6rem, 3.6vw, 2.3rem); line-height: 1.1; letter-spacing: -.02em; }
+.page-head p { margin: .5rem 0 0; color: var(--muted); max-width: 60ch; }
+.page-head .crumb { font-size: .85rem; color: var(--muted); margin-bottom: .5rem; }
+.page-head .crumb a { color: var(--muted); }
+h2.section { font-size: 1.1rem; margin: 2rem 0 .75rem; }
+
+/* Wizard steps */
+ol.steps { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem 1.5rem; padding: 0; margin: 0 0 1.75rem; font-size: .88rem; color: var(--muted); counter-reset: s; }
+ol.steps li { counter-increment: s; display: flex; gap: .45rem; align-items: center; }
+ol.steps li::before { content: counter(s); width: 1.45rem; height: 1.45rem; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line); font-size: .78rem; }
+ol.steps li.done::before { content: "✓"; background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+ol.steps li.current { color: var(--ink); font-weight: 700; }
+ol.steps li.current::before { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* Access screens */
+.gate { max-width: 30rem; margin: 3rem auto 0; }
+.gate h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); line-height: 1.1; letter-spacing: -.02em; margin: 0 0 .5rem; }
+.gate > p { color: var(--muted); margin: 0 0 1.5rem; }
+.qr { background: #fff; padding: .75rem; border-radius: 8px; width: 13rem; border: 1px solid var(--line); }
+.qr svg { display: block; width: 100%; height: auto; }
+.secret { font-family: var(--mono); font-size: .95rem; letter-spacing: .08em; word-break: break-all; background: var(--surface); padding: .5rem .7rem; border-radius: 6px; border: 1px solid var(--line); }
+
+/* Code blocks and fact lists */
+pre.cmd, pre.log { margin: 0; padding: .9rem 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: .8rem/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; overflow: auto; }
+pre.log { max-height: 26rem; }
+.cmd-wrap { position: relative; max-width: 52rem; }
+.cmd-wrap .btn { position: absolute; top: .5rem; right: .5rem; }
+.bigcode { font-family: var(--mono); font-size: 1.6rem; letter-spacing: .12em; font-weight: 700; }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: .45rem 1.5rem; margin: 0; max-width: 52rem; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.chip { font-family: var(--mono); font-size: .78rem; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: .05rem .4rem; }
+.waiting { display: flex; gap: .75rem; align-items: center; color: var(--run); font-weight: 500; }
+.waiting::before { content: ""; width: .8rem; height: .8rem; border-radius: 50%; background: var(--run); animation: breathe 1.4s ease-in-out infinite; }
+
+/* Status badges */
+.badge { display: inline-flex; align-items: center; gap: .4rem; font-size: .8rem; font-weight: 700; padding: .12rem .55rem .12rem .45rem; border-radius: 999px; white-space: nowrap; color: var(--c); background: var(--bg); }
+.badge::before { content: ""; width: .5rem; height: .5rem; border-radius: 50%; background: currentColor; }
+.lv-ok   { --c: var(--ok);   --bg: var(--ok-bg); }
+.lv-warn { --c: var(--warn); --bg: var(--warn-bg); }
+.lv-err  { --c: var(--err);  --bg: var(--err-bg); }
+.lv-run  { --c: var(--run);  --bg: var(--run-bg); }
+.lv-idle { --c: var(--muted); --bg: var(--surface); }
+
+/* Lists (servers, services, audit log) */
+.rows { border-top: 1px solid var(--line); }
+.rows > a, .rows > div.row { display: grid; gap: 1rem; align-items: center; padding: .85rem .5rem; border-bottom: 1px solid var(--line); text-decoration: none; }
+.rows > a:hover { background: var(--surface); }
+.rows.servers > * { grid-template-columns: 8rem minmax(10rem, 1fr) minmax(12rem, 1.3fr) 9rem; }
+.rows.services > * { grid-template-columns: 8rem minmax(10rem, 1.4fr) 10rem 10rem; }
+.rows.audit > * { grid-template-columns: 9.5rem 9rem 10rem 1fr; font-size: .88rem; }
+.rows strong { display: block; }
+.rows small, .muted { color: var(--muted); font-size: .82rem; }
+.rows .badge { justify-self: start; }
+.empty-note { color: var(--muted); padding: 1rem .5rem; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0; }
+.tasks-pick { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); max-width: 60rem; }
+.tasks-pick button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: .8rem .9rem; cursor: pointer; }
+.tasks-pick button:hover { border-color: var(--ink); }
+.tasks-pick strong { display: block; }
+.tasks-pick small { color: var(--muted); font-family: var(--mono); font-size: .75rem; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; }
+
+/* Dashboard */
+.verdict { padding: 2.25rem 0 2rem; border-bottom: 1px solid var(--line); }
+.verdict h1 { margin: 0; font-size: clamp(1.9rem, 4.6vw, 3rem); line-height: 1.08; font-weight: 700; letter-spacing: -.025em; max-width: 22ch; }
+.verdict .sub { margin: .75rem 0 0; color: var(--muted); max-width: 60ch; }
+.attention { list-style: none; margin: 1.5rem 0 0; padding: 0; display: grid; gap: .5rem; max-width: 52rem; }
+.attention li { display: grid; grid-template-columns: 8rem 1fr; gap: .75rem; align-items: baseline; }
+.attention li > .badge { justify-self: start; }
+.attention a { font-weight: 700; text-decoration: none; margin-right: .5rem; }
+.attention a:hover { text-decoration: underline; }
+.attention .why { color: var(--muted); }
+.host { margin-top: 2.5rem; }
+.host h2 { margin: 0 0 .5rem; font-size: 1.1rem; font-weight: 700; display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+.host h2 span { font-weight: 400; font-size: .85rem; color: var(--muted); }
+.host .none { color: var(--muted); border-top: 1px solid var(--line); margin: 0; padding: .9rem .5rem; }
+.task { border-top: 1px solid var(--line); }
+.task:last-child { border-bottom: 1px solid var(--line); }
+.task-head { width: 100%; display: grid; align-items: center; text-align: left; cursor: pointer; grid-template-columns: 8.5rem minmax(10rem, 1.1fr) minmax(12rem, 1.6fr) 11rem; gap: 1rem; padding: .9rem .5rem; background: none; border: 0; }
+.task-head:hover { background: var(--surface); }
+.task-head .badge { justify-self: start; }
+.task.lv-err > .task-head { box-shadow: inset 3px 0 0 var(--err); }
+.task.lv-warn > .task-head { box-shadow: inset 3px 0 0 var(--warn); }
+.name strong { display: block; font-weight: 700; }
+.name small, .when small { display: block; color: var(--muted); font-size: .82rem; }
+.when small { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.progress { display: block; height: 4px; border-radius: 2px; background: var(--run-bg); margin: .35rem 0 .2rem; overflow: hidden; max-width: 18rem; }
+.progress i { display: block; height: 100%; background: var(--run); border-radius: 2px; }
+.strip { display: flex; align-items: flex-end; gap: 2px; height: 2rem; justify-content: flex-end; }
+.strip i { flex: 0 0 5px; border-radius: 1.5px; background: var(--idle); min-height: 3px; }
+.strip i.s-success { background: var(--ok); }
+.strip i.s-warning { background: var(--warn); }
+.strip i.s-error { background: var(--err); }
+.strip i.s-running { background: var(--run); animation: breathe 1.6s ease-in-out infinite; }
+.strip i.s-empty { background: transparent; box-shadow: inset 0 -3px 0 var(--line); }
+@keyframes breathe { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .strip i.s-running, .waiting::before { animation: none; } }
+.task-body { padding: .25rem .5rem 1.5rem; display: grid; grid-template-columns: minmax(15rem, 20rem) 1fr; gap: 1.5rem; }
+.runs { list-style: none; margin: 0; padding: 0; max-height: 26rem; overflow: auto; }
+.runs button { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: .1rem .75rem; text-align: left; border: 0; background: none; padding: .45rem .6rem; border-radius: 6px; cursor: pointer; }
+.runs button:hover { background: var(--surface); }
+.runs button[aria-current="true"] { background: var(--surface); box-shadow: inset 2px 0 0 var(--c); }
+.runs .d { font-size: .88rem; } .runs .t { color: var(--muted); font-size: .82rem; }
+.runs .r { grid-column: 1 / -1; color: var(--c); font-size: .82rem; font-weight: 500; }
+.detail { min-width: 0; }
+.detail .meta { display: flex; flex-wrap: wrap; gap: .35rem 1.5rem; margin: 0 0 .75rem; font-size: .85rem; }
+.detail .meta div { display: flex; gap: .4rem; } .detail dt { color: var(--muted); } .detail dd { margin: 0; font-weight: 500; }
+.detail p.sum { margin: 0 0 .75rem; }
+.detail .open-svc { font-size: .85rem; }
+
+@media (max-width: 52rem) {
+  .task-head, .rows.servers > *, .rows.services > *, .rows.audit > * { grid-template-columns: 1fr auto; gap: .35rem .75rem; }
+  .task-head .badge, .rows .badge { grid-row: 1; grid-column: 2; justify-self: end; }
+  .task-head .name { grid-row: 1; grid-column: 1; }
+  .task-head .when, .task-head .strip, .rows > * > :nth-child(n+3) { grid-column: 1 / -1; }
+  .task-head .strip { justify-content: flex-start; height: 1.5rem; }
+  .task-body, .split { grid-template-columns: 1fr; }
+  .attention li { grid-template-columns: 1fr; gap: .15rem; }
+  .top .right { margin-left: 0; }
+}
+
+/* Checkbox and service ordering */
+.check { display: flex; align-items: center; gap: .55rem; font-weight: 400; cursor: pointer; }
+.check input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--ink, #1b2430); }
+.rows.reorder > div.row { grid-template-columns: 2.2rem minmax(10rem, 1.4fr) 10rem 5.5rem; }
+.rows.reorder .pos { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.rows.reorder .moves { display: flex; gap: .3rem; justify-content: flex-end; }
+.rows.reorder .moves .btn { padding: .2rem .55rem; min-width: 2.2rem; }
+@media (max-width: 640px) { .rows.reorder > div.row { grid-template-columns: 2rem 1fr 5.5rem; } .rows.reorder .sched { display: none; } }
+/* Logo */
+.brand .logo { display: block; width: 28px; height: 28px; }
+/* Language selector */
+.lang { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .85rem; }
+.lang select { width: auto; padding: .25rem 1.6rem .25rem .5rem; font-size: .85rem; border-radius: 6px; }
+.top .brand-only { margin-right: auto; }
+</style>
+</head>
+<body data-auth="no">
+<div class="wrap">
+  <header class="top" id="top">
+    <a class="brand" href="#/">
+      <img class="logo" src="favicon.svg" width="28" height="28" alt="">
+      Vigie
+    </a>
+    <nav class="main" hidden>
+      <a href="#/" data-nav="dashboard"></a>
+      <a href="#/servers" data-nav="servers"></a>
+      <a href="#/audit" data-nav="audit"></a>
+      <a href="#/settings" data-nav="settings"></a>
+    </nav>
+    <div class="right">
+      <span id="stamp" hidden></span>
+      <label class="lang"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><select id="lang"></select></label>
+    </div>
+  </header>
+  <main id="app" aria-live="polite"></main>
+</div>
+
+<script>
+'use strict';
+// ═══ Translations ═══════════════════════════════════════════════════════════
+// Add a language by adding a dictionary: any missing key falls back to English.
+const I18N = {
+  en: {
+    'lang.name': 'English', 'lang.label': 'Language', 'locale': 'en-GB',
+    'nav.dashboard': 'Dashboard', 'nav.servers': 'Servers', 'nav.audit': 'Audit log', 'nav.settings': 'Settings',
+    'nav.main': 'Main navigation',
+    'common.loading': 'Loading…', 'common.save': 'Save', 'common.cancel': 'Cancel', 'common.finish': 'Finish',
+    'common.copy': 'Copy', 'common.copied': 'Copied', 'common.retry': 'Try again', 'common.optional': '(optional)',
+    'common.none': 'none', 'common.never': 'never', 'common.refreshed': 'Updated at {time}',
+    'time.just_now': 'just now', 'time.min_ago': '{n} min ago', 'time.ago': '{d} ago', 'time.today_at': 'today at {t}',
+    'time.yesterday_at': 'yesterday at {t}', 'time.date_at': '{d} at {t}', 'unit.day': 'd',
+    'interval.every': 'Every {i}',
+
+    'boot.down_title': 'Vigie is not responding.',
+    'boot.down_hint': 'Check that the containers are running. Inside the API container, <code>vigie-admin doctor</code> shows what is missing.',
+
+    'setup.step_password': 'Password', 'setup.step_mfa': 'Two-factor authentication',
+    'setup.title': 'First-run setup',
+    'setup.intro': 'Create Vigie\'s administrator access. There is a single account, protected by a password and a one-time code.',
+    'setup.code': 'First-run setup code',
+    'setup.code_help': 'You will find it in the API container\'s log:',
+    'setup.password': 'Password', 'setup.password_help': '{min} characters minimum. A password manager is ideal.',
+    'setup.confirm': 'Confirmation', 'setup.continue': 'Continue', 'setup.mismatch': 'The two passwords differ.',
+    'mfa.title': 'Two-factor authentication',
+    'mfa.intro': 'Mandatory. Scan this code with your authenticator app (Aegis, 2FAS, Bitwarden, Google Authenticator…), then enter the six-digit code it shows. The account is only created once this is done.',
+    'mfa.qr_alt': 'TOTP setup QR code', 'mfa.manual': 'Manual key entry', 'mfa.manual_help': 'TOTP, SHA-1, 6 digits, 30 seconds.',
+    'mfa.code': 'Code shown by the app', 'mfa.submit': 'Enable and finish',
+
+    'login.title': 'Sign in', 'login.intro': 'Administrator password and the code from your authenticator app.',
+    'login.password': 'Password', 'login.code': 'Six-digit code', 'login.submit': 'Sign in',
+    'login.remember': 'Stay signed in for 7 days on this device',
+
+    'health.ok': 'OK', 'health.running': 'Running', 'health.warning': 'Warning', 'health.overrun': 'Too long',
+    'health.unknown': 'Never run', 'health.late': 'Late', 'health.lost': 'No news', 'health.error': 'Error',
+    'run.success': 'Succeeded', 'run.warning': 'With warnings', 'run.error': 'Failed', 'run.running': 'Running',
+    'reason.lost': 'No signal for {d}: the task or the server stopped midway.',
+    'reason.overrun': 'Running for {d}, beyond the planned {limit}.',
+    'reason.failed_silent': 'Failed without a message, see the log.',
+    'reason.never_succeeded': 'No successful run recorded.',
+    'reason.late': 'Last success {d} ago, expected at least every {limit}.',
+    'dash.empty_title': 'No server enrolled yet.',
+    'dash.empty_sub': 'Add a first server: Vigie will show you the command that installs its agent.',
+    'dash.add_server': 'Add a server',
+    'dash.all_good': 'All good.',
+    'dash.issues_one': '{n} item needs your attention.', 'dash.issues_other': '{n} items need your attention.',
+    'dash.services_one': '{n} monitored service', 'dash.services_other': '{n} monitored services',
+    'dash.servers_one': '{n} server', 'dash.servers_other': '{n} servers',
+    'dash.sub': '{services} on {servers}.', 'dash.sub_running': '{services} on {servers}, {n} of them running.',
+    'dash.agent_silent': 'Silent agent', 'dash.last_sync': 'last sync {ago}', 'dash.never_synced': 'never synced',
+    'dash.on_host': 'on {host}', 'dash.since': 'for {d}',
+    'dash.host_services_one': '{n} service', 'dash.host_services_other': '{n} services',
+    'dash.agent_line': 'agent synced {ago}, {pace}', 'dash.pace_fast': 'fast sync in progress', 'dash.pace': 'sync every {i}',
+    'dash.no_service': 'No scheduled service.', 'dash.add_service': 'Add a service',
+    'dash.no_run': 'No run yet', 'dash.no_run_hint': 'Waiting for the first scheduled run.',
+    'dash.running_for': 'For {d}, {usual}', 'dash.usually': 'usually ~{d}', 'dash.first_tracked': 'first tracked run',
+    'dash.previous': 'Previous: {s}', 'dash.when': '{ago}, in {d}',
+    'dash.no_runs': 'No run.', 'dash.loading_log': 'Loading the log…', 'dash.exit_code': 'Exit code',
+    'dash.empty_log': 'Empty log.', 'dash.service_config': 'Service configuration',
+
+    'agent.ok': 'Active', 'agent.silent': 'Silent', 'agent.pending': 'To enrol', 'agent.revoked': 'Revoked',
+    'servers.title': 'Servers', 'servers.intro': 'Each server runs an agent that fetches its configuration from Vigie.',
+    'servers.synced': 'Synced {ago}, every {i}', 'servers.enroll_pending': 'Enrolment code pending',
+    'servers.not_enrolled': 'Not enrolled yet', 'servers.enabled': '{a}/{n} enabled', 'servers.none': 'No server declared.',
+    'servers.add': 'Add a server',
+
+    'wiz.server_title': 'Add a server', 'wiz.step_info': 'Server information', 'wiz.step_install': 'Install the agent',
+    'wiz.step_test': 'Agent connection test',
+    'wiz.name': 'Name', 'wiz.name_help': 'Letters, digits, dot, dash and underscore. Shown in the dashboard and in Homepage.',
+    'wiz.descr': 'Description', 'wiz.interval': 'Sync frequency',
+    'wiz.interval_help': 'Maximum delay before the agent picks up a change. After each change, it syncs every minute for 15 minutes.',
+    'wiz.create': 'Create and get the enrolment code',
+    'enroll.code': 'Enrolment code', 'enroll.valid_for': 'Single use, valid for another {d}.', 'enroll.expired_short': 'Code expired.',
+    'enroll.on_server': 'On the server',
+    'enroll.cmd_where': 'On {server}, in the directory where you copied the agent (vigie + tasks/)',
+    'enroll.cmd_state': 'local state, on disk (not /var on OpenWRT)',
+    'enroll.cmd_secrets': 'passwords, read locally, never sent',
+    'enroll.no_public_url': 'VIGIE_PUBLIC_URL is not set: replace the address with Vigie\'s address as seen from this server.',
+    'enroll.waiting': 'Waiting for the agent\'s first contact…',
+    'enroll.expired': 'The code expired before the agent showed up.', 'enroll.retry': 'Try again with a new code',
+    'enroll.connected': 'Connection established: the agent of {server} enrolled and synced.',
+    'facts.system': 'System', 'facts.tasks': 'Available tasks', 'facts.containers': 'Containers', 'facts.mounts': 'Mounts',
+    'facts.secrets': 'Available secrets', 'facts.secrets_note': 'Names only: values never leave the server.',
+    'facts.commands': 'Commands', 'facts.boot': 'Started', 'facts.version': 'Version', 'facts.last_sync': 'Last sync',
+    'facts.fast_until': '(fast sync until {t})', 'facts.enrolled': 'Enrolled', 'facts.no': 'no', 'facts.code_pending': '(code pending)',
+
+    'server.rejected': 'The agent rejected some services:',
+    'server.not_root': 'The agent runs as "{user}", not root: most tasks (docker, mdadm, borg, reboot…) will fail. Remove the Vigie block from this user\'s crontab, then run "sudo ./vigie sync".', 'server.services': 'Services', 'server.no_services': 'No service on this server.',
+    'server.not_scheduled': 'not scheduled', 'server.never_run': 'never run', 'server.svc_disabled': 'Disabled',
+    'server.svc_scheduled': 'Scheduled', 'server.agent': 'Agent', 'server.info': 'Reported information',
+    'server.fast': 'Fast sync for 15 min', 'server.reenroll': 'Re-enrol (new code)', 'server.new_code': 'New enrolment code',
+    'server.revoke': 'Revoke the agent', 'server.delete': 'Delete the server',
+    'order.edit': 'Change the order', 'order.intro': 'This order is used on this page, in the dashboard and in the server\'s crontab.',
+    'order.sort': 'Sort by time', 'order.save': 'Save the order', 'order.up': 'Move up', 'order.down': 'Move down',
+    'order.saved': 'Order saved. The agent will rewrite its crontab at its next sync.',
+    'order.agent_old': 'The agent of this server (version {v}) ignores the order: update it to version 2.3 or later.',
+    'server.saved': 'Saved. The agent will apply the new frequency at its next sync.',
+    'server.fast_done': 'Fast sync requested: it starts at the agent\'s next sync (within {i}), then lasts 15 minutes.',
+    'facts.fast_pending': '(fast sync requested, starts at the next sync)',
+    'server.confirm_code': 'Generate a new code? The current agent stays valid until it re-enrols.',
+    'server.confirm_revoke': 'Revoke the agent of {server}? It will no longer sync or report. Its already scheduled tasks keep running locally.',
+    'server.revoked': 'Agent revoked.',
+    'server.confirm_delete': 'Delete {server}, its services and all their history? Type the server name to confirm.',
+
+    'svc.title': 'Add a service', 'svc.step_task': 'Task type', 'svc.step_params': 'Parameters', 'svc.step_test': 'Test',
+    'svc.step_schedule': 'Schedule',
+    'svc.no_catalog': 'This server\'s agent has not sent its task list yet. Wait for its first sync.',
+    'svc.name': 'Service name', 'svc.name_help': 'Task <code>{task}</code>. This name appears in the dashboard.',
+    'svc.save_test': 'Save and test', 'svc.save_retest': 'Save and test again', 'svc.change_task': 'Change task',
+    'svc.sending': 'Sending the check request…', 'svc.sent': 'Request sent, handled {when}.',
+    'delay.fast': 'within a minute',
+    'svc.sync_hint': 'To avoid waiting, run <code>./vigie sync</code> on the server. Agents 2.9 and later check for requests every minute.', 'delay.next_sync': 'at the next sync (within {m} min)',
+    'svc.check_ok': 'Check succeeded: the service is ready.', 'svc.check_failed': 'The check failed.',
+    'svc.run_ok': 'Run finished.', 'svc.run_failed': 'The run failed.', 'svc.no_answer': 'The agent did not answer in time.',
+    'svc.to_schedule': 'Continue to scheduling', 'svc.finish_unscheduled': 'Finish (without scheduling)',
+    'svc.edit_params': 'Edit the parameters', 'svc.retry': 'Try again',
+    'svc.schedule_enable': 'Schedule and enable',
+    'svc.scheduled_done': 'Service scheduled "{cron}". The agent will add it to its crontab at its next sync.',
+    'svc.add_another': 'Add another service', 'svc.back_server': 'Back to the server',
+    'param.no': 'No', 'param.yes': 'Yes', 'param.none': 'None', 'param.default': 'default: {v}',
+    'param.help_path': 'Absolute path.', 'param.help_paths': 'Absolute paths, separated by spaces.',
+    'param.help_varname': 'Name of the variable in the server\'s secrets file. Its value is never sent to Vigie.',
+    'param.help_names': 'Names separated by spaces.',
+    'param.help.backup-borg.STOP_CONTAINERS': 'Container names separated by spaces, for example an application writing to the archived directories. Stopped after the database dump, started again in reverse order after the archive, even if it fails.',
+    'param.help.backup-borg.REPO_DIR': 'Directory of the Borg repository, where archives are written, for example /mnt/backup/Backup_Nextcloud. Not the path of the borg program.',
+    'param.help.backup-borg.CONTAINER': 'Only for Nextcloud: puts it in maintenance mode during the backup, which is better than stopping it. Leave empty otherwise.',
+    'param.help.reboot.ONLY_IF_NEEDED': 'Debian and Ubuntu flag a required reboot after some updates (kernel, libraries). Other systems, OpenWRT included, never do: leave "No" there.',
+    'param.help.reboot.WAIT_MAX_MIN': 'If other Vigie services are still running (a backup…), the reboot waits for them. After this delay, it is cancelled and reported as an error.',
+    'param.help.sqlite-backup.DB_PATH': 'Path of the database file as seen from the container, for example /var/www/html/data/app.db; or on this server if no container is set. Find it with: <code>docker exec &lt;container&gt; find / -name "*.db" -o -name "*.sqlite*"</code>',
+    'param.help.sqlite-backup.CONTAINER': 'The container of the application using the database. SQLite makes a consistent copy while the application keeps running. Leave empty for a file on this server.',
+    'param.help.PASSWORD_ENV': 'Name of an environment variable of the container, for example MYSQL_ROOT_PASSWORD. It is read inside the container; its value never goes through Vigie. Use this or the secrets file, not both.',
+    'cron.frequency': 'Frequency', 'cron.daily': 'Every day', 'cron.weekly': 'Every week', 'cron.monthly': 'Every month',
+    'cron.hourly': 'Every hour', 'cron.custom': 'Cron expression', 'cron.day': 'Day', 'cron.dom': 'Day of the month',
+    'cron.time': 'Time', 'cron.minute': 'Minute', 'cron.expr': 'Cron expression',
+    'cron.expr_help': 'Minute, hour, day of month, month, day of week.', 'cron.preview': 'Line installed on the server:',
+    'cron.days': 'Sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday',
+    'detail.summary': 'Task <code>{task}</code>, {state}.', 'detail.scheduled': 'scheduled "{cron}"', 'detail.unscheduled': 'not scheduled',
+    'detail.test': 'Test', 'detail.run': 'Run now', 'detail.history': 'History in the dashboard',
+    'detail.schedule': 'Scheduling', 'detail.change_schedule': 'Change the schedule', 'detail.disable': 'Disable',
+    'detail.params': 'Parameters', 'detail.late_after': 'Alert "late" after', 'detail.long_after': 'Alert "too long" after',
+    'detail.minutes_default': '(minutes; empty = {n}, from the schedule)', 'detail.minutes_task': '(minutes, empty = {n})', 'detail.task_gone': 'This task is no longer offered by the server\'s agent.',
+    'detail.jobs': 'Recent requests', 'detail.no_jobs': 'No request.', 'detail.job_check': 'Check', 'detail.job_run': 'On-demand run',
+    'detail.job_n': 'request {n}', 'detail.job_ok': 'OK', 'detail.job_failed': 'Failed', 'detail.job_expired': 'Expired',
+    'detail.job_pending': 'Pending', 'detail.job_title': 'Request {n}', 'detail.no_output': 'No output recorded.',
+    'detail.confirm_reboot': 'Reboot {server} now? It will restart once this run is reported, unless other services are still running.',
+    'detail.delete': 'Delete the service', 'detail.confirm_delete': 'Delete "{name}" and all its history?',
+    'detail.saved': 'Parameters saved. Remember to test the service again.', 'detail.force': '{msg}\n\nSchedule anyway?',
+
+    'audit.title': 'Audit log', 'audit.intro': 'Every action: sign-ins, enrolments, changes, requests.',
+    'settings.title': 'Settings', 'settings.password': 'Change the password', 'settings.current': 'Current password',
+    'settings.new': 'New password', 'settings.confirm': 'Confirmation', 'settings.code': 'Six-digit code',
+    'settings.submit': 'Change the password', 'settings.changed': 'Password changed. Other open sessions are closed.',
+    'settings.session': 'Session',
+    'settings.session_text': 'A session expires after 30 minutes of inactivity, and after 12 hours at most; with "Stay signed in", after 7 days. Changing the password closes every session. If you lose your phone, <code>vigie-admin admin:reset --confirm=yes</code> in the API container puts Vigie back into first-run setup.',
+    'settings.logout': 'Sign out',
+
+    'err.http': 'HTTP error {status}',
+    'err.bad_response': 'Unreadable response from the API (HTTP {status}): see docker logs 8213-vigie-api.',
+    'err.unexpected': 'Unexpected error: {msg}',
+  },
+
+  fr: {
+    'lang.name': 'Français', 'lang.label': 'Langue', 'locale': 'fr-CH',
+    'nav.dashboard': 'Tableau de bord', 'nav.servers': 'Serveurs', 'nav.audit': 'Journal', 'nav.settings': 'Paramètres',
+    'nav.main': 'Navigation principale',
+    'common.loading': 'Chargement…', 'common.save': 'Enregistrer', 'common.cancel': 'Annuler', 'common.finish': 'Fin',
+    'common.copy': 'Copier', 'common.copied': 'Copié', 'common.retry': 'Réessayer', 'common.optional': '(facultatif)',
+    'common.none': 'aucun', 'common.never': 'jamais', 'common.refreshed': 'Actualisé à {time}',
+    'time.just_now': "à l'instant", 'time.min_ago': 'il y a {n} min', 'time.ago': 'il y a {d}', 'time.today_at': "aujourd'hui à {t}",
+    'time.yesterday_at': 'hier à {t}', 'time.date_at': '{d} à {t}', 'unit.day': 'j',
+    'interval.every': 'Toutes les {i}',
+
+    'boot.down_title': 'Vigie ne répond pas.',
+    'boot.down_hint': "Vérifie que les conteneurs tournent. Dans le conteneur de l'API, <code>vigie-admin doctor</code> indique ce qui manque.",
+
+    'setup.step_password': 'Mot de passe', 'setup.step_mfa': 'Double authentification',
+    'setup.title': 'Première configuration',
+    'setup.intro': "Crée l'accès administrateur de Vigie. Il n'y a qu'un seul compte, protégé par mot de passe et code à usage unique.",
+    'setup.code': 'Code de première configuration',
+    'setup.code_help': "Il se trouve dans le journal du conteneur de l'API :",
+    'setup.password': 'Mot de passe', 'setup.password_help': "{min} caractères au moins. Un gestionnaire de mots de passe est l'idéal.",
+    'setup.confirm': 'Confirmation', 'setup.continue': 'Continuer', 'setup.mismatch': 'Les deux mots de passe diffèrent.',
+    'mfa.title': 'Double authentification',
+    'mfa.intro': "Obligatoire. Scanne ce code avec ton application d'authentification (Aegis, 2FAS, Bitwarden, Google Authenticator…), puis saisis le code à six chiffres qu'elle affiche. Le compte n'est créé qu'à cette condition.",
+    'mfa.qr_alt': 'QR code de configuration TOTP', 'mfa.manual': 'Saisie manuelle de la clé', 'mfa.manual_help': 'TOTP, SHA-1, 6 chiffres, 30 secondes.',
+    'mfa.code': "Code affiché par l'application", 'mfa.submit': 'Activer et terminer',
+
+    'login.title': 'Connexion', 'login.intro': "Mot de passe administrateur et code de ton application d'authentification.",
+    'login.password': 'Mot de passe', 'login.code': 'Code à six chiffres', 'login.submit': 'Se connecter',
+    'login.remember': 'Rester connecté 7 jours sur cet appareil',
+
+    'health.ok': 'OK', 'health.running': 'En cours', 'health.warning': 'Attention', 'health.overrun': 'Trop longue',
+    'health.unknown': 'Jamais lancée', 'health.late': 'En retard', 'health.lost': 'Sans nouvelles', 'health.error': 'Erreur',
+    'run.success': 'Réussie', 'run.warning': 'Avec avertissement', 'run.error': 'Échec', 'run.running': 'En cours',
+    'reason.lost': "Plus aucun signal depuis {d} : la tâche ou le serveur s'est arrêté en cours de route.",
+    'reason.overrun': 'Tourne depuis {d}, au-delà des {limit} prévues.',
+    'reason.failed_silent': 'Échec sans message, voir le journal.',
+    'reason.never_succeeded': 'Aucune exécution réussie enregistrée.',
+    'reason.late': 'Dernier succès il y a {d}, attendu au moins toutes les {limit}.',
+    'dash.empty_title': "Aucun serveur enrôlé pour l'instant.",
+    'dash.empty_sub': "Ajoute un premier serveur : Vigie t'indiquera la commande à lancer pour y installer l'agent.",
+    'dash.add_server': 'Ajouter un serveur',
+    'dash.all_good': 'Tout est en ordre.',
+    'dash.issues_one': '{n} point demande ton attention.', 'dash.issues_other': '{n} points demandent ton attention.',
+    'dash.services_one': '{n} service surveillé', 'dash.services_other': '{n} services surveillés',
+    'dash.servers_one': '{n} serveur', 'dash.servers_other': '{n} serveurs',
+    'dash.sub': '{services} sur {servers}.', 'dash.sub_running': "{services} sur {servers}, dont {n} en cours d'exécution.",
+    'dash.agent_silent': 'Agent muet', 'dash.last_sync': 'dernière synchro {ago}', 'dash.never_synced': 'jamais synchronisé',
+    'dash.on_host': 'sur {host}', 'dash.since': 'depuis {d}',
+    'dash.host_services_one': '{n} service', 'dash.host_services_other': '{n} services',
+    'dash.agent_line': 'agent synchronisé {ago}, {pace}', 'dash.pace_fast': 'synchro rapide en cours', 'dash.pace': 'synchro toutes les {i}',
+    'dash.no_service': 'Aucun service planifié.', 'dash.add_service': 'Ajouter un service',
+    'dash.no_run': 'Aucune exécution', 'dash.no_run_hint': 'En attente de la première exécution planifiée.',
+    'dash.running_for': 'Depuis {d}, {usual}', 'dash.usually': 'habituellement ~{d}', 'dash.first_tracked': 'première exécution suivie',
+    'dash.previous': 'Précédente : {s}', 'dash.when': '{ago}, en {d}',
+    'dash.no_runs': 'Aucune exécution.', 'dash.loading_log': 'Chargement du journal…', 'dash.exit_code': 'Code de sortie',
+    'dash.empty_log': 'Journal vide.', 'dash.service_config': 'Configuration du service',
+
+    'agent.ok': 'Actif', 'agent.silent': 'Muet', 'agent.pending': 'À enrôler', 'agent.revoked': 'Révoqué',
+    'servers.title': 'Serveurs', 'servers.intro': 'Chaque serveur exécute un agent qui vient chercher sa configuration auprès de Vigie.',
+    'servers.synced': 'Synchro {ago}, toutes les {i}', 'servers.enroll_pending': "Code d'enrôlement en attente",
+    'servers.not_enrolled': 'Pas encore enrôlé', 'servers.enabled': '{a}/{n} actifs', 'servers.none': 'Aucun serveur déclaré.',
+    'servers.add': 'Ajouter un serveur',
+
+    'wiz.server_title': 'Ajouter un serveur', 'wiz.step_info': 'Informations serveur', 'wiz.step_install': "Installer l'agent",
+    'wiz.step_test': 'Test connexion agent',
+    'wiz.name': 'Nom', 'wiz.name_help': 'Lettres, chiffres, point, tiret et souligné. Il apparaît dans le tableau de bord et dans Homepage.',
+    'wiz.descr': 'Description', 'wiz.interval': 'Fréquence de synchronisation',
+    'wiz.interval_help': "Délai maximal avant que l'agent prenne en compte une modification. Après chaque modification, il se synchronise chaque minute pendant 15 minutes.",
+    'wiz.create': "Créer et obtenir le code d'enrôlement",
+    'enroll.code': "Code d'enrôlement", 'enroll.valid_for': 'Usage unique, valable encore {d}.', 'enroll.expired_short': 'Code expiré.',
+    'enroll.on_server': 'Sur le serveur',
+    'enroll.cmd_where': "Sur {server}, dans le dossier où tu as copié l'agent (vigie + tasks/)",
+    'enroll.cmd_state': 'état local, sur disque (pas /var sur OpenWRT)',
+    'enroll.cmd_secrets': 'mots de passe, lus localement, jamais transmis',
+    'enroll.no_public_url': "VIGIE_PUBLIC_URL n'est pas défini : remplace l'adresse par celle de Vigie vue depuis ce serveur.",
+    'enroll.waiting': "En attente du premier contact de l'agent…",
+    'enroll.expired': "Le code a expiré avant que l'agent se manifeste.", 'enroll.retry': 'Nouvel essai avec un nouveau code',
+    'enroll.connected': "Connexion établie : l'agent de {server} s'est enrôlé et synchronisé.",
+    'facts.system': 'Système', 'facts.tasks': 'Tâches disponibles', 'facts.containers': 'Conteneurs', 'facts.mounts': 'Montages',
+    'facts.secrets': 'Secrets disponibles', 'facts.secrets_note': 'Noms seulement : les valeurs ne quittent jamais le serveur.',
+    'facts.commands': 'Commandes', 'facts.boot': 'Démarré', 'facts.version': 'Version', 'facts.last_sync': 'Dernière synchro',
+    'facts.fast_until': "(synchro rapide jusqu'à {t})", 'facts.enrolled': 'Enrôlé', 'facts.no': 'non', 'facts.code_pending': '(code en attente)',
+
+    'server.rejected': "L'agent a refusé des services :",
+    'server.not_root': "L'agent tourne sous « {user} », pas en root : la plupart des tâches (docker, mdadm, borg, reboot…) échoueront. Retire le bloc Vigie de la crontab de cet utilisateur, puis lance « sudo ./vigie sync ».", 'server.services': 'Services', 'server.no_services': 'Aucun service sur ce serveur.',
+    'server.not_scheduled': 'non planifié', 'server.never_run': 'jamais exécuté', 'server.svc_disabled': 'Inactif',
+    'server.svc_scheduled': 'Planifié', 'server.agent': 'Agent', 'server.info': 'Informations remontées',
+    'server.fast': 'Synchro rapide 15 min', 'server.reenroll': 'Réenrôler (nouveau code)', 'server.new_code': "Nouveau code d'enrôlement",
+    'server.revoke': "Révoquer l'agent", 'server.delete': 'Supprimer le serveur',
+    'order.edit': "Modifier l'ordre", 'order.intro': 'Cet ordre est utilisé sur cette page, dans le tableau de bord et dans la crontab du serveur.',
+    'order.sort': 'Trier par horaire', 'order.save': "Enregistrer l'ordre", 'order.up': 'Monter', 'order.down': 'Descendre',
+    'order.saved': "Ordre enregistré. L'agent réécrira sa crontab à sa prochaine synchronisation.",
+    'order.agent_old': "L'agent de ce serveur (version {v}) ignore l'ordre : mets-le à jour en version 2.3 ou plus.",
+    'err.order_invalid': "L'ordre doit contenir chaque service du serveur exactement une fois",
+    'server.saved': "Enregistré. L'agent appliquera la nouvelle fréquence à sa prochaine synchronisation.",
+    'server.fast_done': "Synchro rapide demandée : elle démarre à la prochaine synchronisation de l'agent (au plus {i}), puis dure 15 minutes.",
+    'facts.fast_pending': '(synchro rapide demandée, démarre à la prochaine synchro)',
+    'server.confirm_code': "Générer un nouveau code ? L'agent actuel reste valable jusqu'au réenrôlement.",
+    'server.confirm_revoke': "Révoquer l'agent de {server} ? Il ne pourra plus se synchroniser ni rapporter. Ses tâches déjà planifiées continuent localement.",
+    'server.revoked': 'Agent révoqué.',
+    'server.confirm_delete': 'Supprimer {server}, ses services et tout leur historique ? Tape le nom du serveur pour confirmer.',
+
+    'svc.title': 'Ajouter un service', 'svc.step_task': 'Type de tâche', 'svc.step_params': 'Paramètres', 'svc.step_test': 'Test',
+    'svc.step_schedule': 'Planification',
+    'svc.no_catalog': "L'agent de ce serveur n'a pas encore envoyé la liste de ses tâches. Attends sa première synchronisation.",
+    'svc.name': 'Nom du service', 'svc.name_help': 'Tâche <code>{task}</code>. Ce nom apparaît dans le tableau de bord.',
+    'svc.save_test': 'Enregistrer et tester', 'svc.save_retest': 'Enregistrer et retester', 'svc.change_task': 'Changer de tâche',
+    'svc.sending': 'Envoi de la demande de vérification…', 'svc.sent': 'Demande transmise, traitée {when}.',
+    'delay.fast': 'dans la minute',
+    'svc.sync_hint': "Pour ne pas attendre, lance <code>./vigie sync</code> sur le serveur. Les agents 2.9 et suivants vérifient les demandes chaque minute.", 'delay.next_sync': 'à la prochaine synchronisation (au plus {m} min)',
+    'svc.check_ok': 'Vérification réussie : le service est prêt.', 'svc.check_failed': 'La vérification a échoué.',
+    'svc.run_ok': 'Exécution terminée.', 'svc.run_failed': "L'exécution a échoué.", 'svc.no_answer': "L'agent n'a pas répondu à temps.",
+    'svc.to_schedule': 'Continuer vers la planification', 'svc.finish_unscheduled': 'Fin (sans planifier)',
+    'svc.edit_params': 'Modifier les paramètres', 'svc.retry': 'Nouvel essai',
+    'svc.schedule_enable': 'Planifier et activer',
+    'svc.scheduled_done': "Service planifié « {cron} ». L'agent l'installera dans sa crontab à sa prochaine synchronisation.",
+    'svc.add_another': 'Ajouter un autre service', 'svc.back_server': 'Retour au serveur',
+    'param.no': 'Non', 'param.yes': 'Oui', 'param.none': 'Aucun', 'param.default': 'défaut : {v}',
+    'param.help_path': 'Chemin absolu.', 'param.help_paths': 'Chemins absolus séparés par des espaces.',
+    'param.help_varname': "Nom de la variable dans le fichier de secrets du serveur. La valeur n'est jamais transmise à Vigie.",
+    'param.help_names': 'Noms séparés par des espaces.',
+    'param.help.backup-borg.STOP_CONTAINERS': "Noms de conteneurs séparés par des espaces, par exemple une application qui écrit dans les dossiers archivés. Arrêtés après le dump de la base, redémarrés dans l'ordre inverse après l'archive, même en cas d'échec.",
+    'param.help.backup-borg.REPO_DIR': "Dossier du dépôt Borg, là où les archives sont écrites, par exemple /mnt/backup/Backup_Nextcloud. Ce n'est pas le chemin du programme borg.",
+    'param.help.backup-borg.CONTAINER': "Uniquement pour Nextcloud : le met en mode maintenance pendant la sauvegarde, ce qui vaut mieux que de l'arrêter. Laisser vide sinon.",
+    'param.help.reboot.ONLY_IF_NEEDED': "Debian et Ubuntu signalent un redémarrage nécessaire après certaines mises à jour (noyau, bibliothèques). Les autres systèmes, dont OpenWRT, ne le font jamais : laisse « Non ».",
+    'param.help.reboot.WAIT_MAX_MIN': "Si d'autres services Vigie sont en cours (une sauvegarde…), le redémarrage les attend. Au-delà de ce délai, il est annulé et signalé en erreur.",
+    'param.help.sqlite-backup.DB_PATH': "Chemin du fichier de la base vu depuis le conteneur, par exemple /var/www/html/data/app.db ; ou sur ce serveur si aucun conteneur n'est indiqué. Pour le trouver : <code>docker exec &lt;conteneur&gt; find / -name \"*.db\" -o -name \"*.sqlite*\"</code>",
+    'param.help.sqlite-backup.CONTAINER': "Le conteneur de l'application qui utilise la base. SQLite en fait une copie cohérente pendant que l'application continue de tourner. Laisser vide pour un fichier sur ce serveur.",
+    'param.help.PASSWORD_ENV': "Nom d'une variable d'environnement du conteneur, par exemple MYSQL_ROOT_PASSWORD. Elle est lue dans le conteneur ; sa valeur ne transite jamais par Vigie. À utiliser à la place du fichier de secrets, pas en plus.",
+    'cron.frequency': 'Fréquence', 'cron.daily': 'Chaque jour', 'cron.weekly': 'Chaque semaine', 'cron.monthly': 'Chaque mois',
+    'cron.hourly': 'Toutes les heures', 'cron.custom': 'Expression cron', 'cron.day': 'Jour', 'cron.dom': 'Jour du mois',
+    'cron.time': 'Heure', 'cron.minute': 'Minute', 'cron.expr': 'Expression cron',
+    'cron.expr_help': 'Minute, heure, jour du mois, mois, jour de la semaine.', 'cron.preview': 'Ligne installée sur le serveur :',
+    'cron.days': 'dimanche,lundi,mardi,mercredi,jeudi,vendredi,samedi',
+    'detail.summary': 'Tâche <code>{task}</code>, {state}.', 'detail.scheduled': 'planifiée « {cron} »', 'detail.unscheduled': 'non planifiée',
+    'detail.test': 'Tester', 'detail.run': 'Exécuter maintenant', 'detail.history': 'Historique dans le tableau de bord',
+    'detail.schedule': 'Planification', 'detail.change_schedule': 'Modifier la planification', 'detail.disable': 'Désactiver',
+    'detail.params': 'Paramètres', 'detail.late_after': 'Alerte « en retard » après', 'detail.long_after': 'Alerte « trop longue » après',
+    'detail.minutes_default': "(minutes ; vide = {n}, d'après la planification)", 'detail.minutes_task': '(minutes, vide = {n})', 'detail.task_gone': "Cette tâche n'est plus proposée par l'agent du serveur.",
+    'detail.jobs': 'Demandes récentes', 'detail.no_jobs': 'Aucune demande.', 'detail.job_check': 'Vérification', 'detail.job_run': 'Exécution à la demande',
+    'detail.job_n': 'demande {n}', 'detail.job_ok': 'OK', 'detail.job_failed': 'Échec', 'detail.job_expired': 'Expirée',
+    'detail.job_pending': 'En attente', 'detail.job_title': 'Demande {n}', 'detail.no_output': 'Pas de sortie enregistrée.',
+    'detail.confirm_reboot': "Redémarrer {server} maintenant ? Il redémarrera dès que cette exécution sera rapportée, sauf si d'autres services sont encore en cours.",
+    'detail.delete': 'Supprimer le service', 'detail.confirm_delete': 'Supprimer « {name} » et tout son historique ?',
+    'detail.saved': 'Paramètres enregistrés. Pense à retester le service.', 'detail.force': '{msg}\n\nPlanifier quand même ?',
+
+    'audit.title': 'Journal', 'audit.intro': 'Toutes les actions : connexions, enrôlements, modifications, demandes.',
+    'settings.title': 'Paramètres', 'settings.password': 'Changer le mot de passe', 'settings.current': 'Mot de passe actuel',
+    'settings.new': 'Nouveau mot de passe', 'settings.confirm': 'Confirmation', 'settings.code': 'Code à six chiffres',
+    'settings.submit': 'Changer le mot de passe', 'settings.changed': 'Mot de passe changé. Les autres sessions ouvertes sont fermées.',
+    'settings.session': 'Session',
+    'settings.session_text': "Une session expire après 30 minutes d'inactivité, et au plus tard après 12 heures ; avec « Rester connecté », après 7 jours. Changer le mot de passe ferme toutes les sessions. Si tu perds ton téléphone, <code>vigie-admin admin:reset --confirm=yes</code> dans le conteneur de l'API remet Vigie en première configuration.",
+    'settings.logout': 'Se déconnecter',
+
+    // API errors (English text is provided by the API as a fallback)
+    'err.http': 'Erreur HTTP {status}',
+    'err.bad_response': "Réponse illisible de l'API (HTTP {status}) : voir docker logs 8213-vigie-api.",
+    'err.unexpected': 'Erreur inattendue : {msg}',
+    'err.request_too_large': 'Requête trop volumineuse', 'err.invalid_json': 'JSON invalide', 'err.unknown_route': 'Route inconnue',
+    'err.request_refused': 'Requête refusée', 'err.db_unavailable': 'Base de données indisponible', 'err.internal_error': "Erreur interne de l'API",
+    'err.app_key_invalid': 'VIGIE_APP_KEY absente ou invalide (64 caractères hexadécimaux attendus)',
+    'err.totp_undecryptable': 'Secret TOTP indéchiffrable : VIGIE_APP_KEY a-t-elle changé ?',
+    'err.session_required': 'Session expirée ou absente', 'err.already_configured': 'Vigie est déjà configuré',
+    'err.not_configured': "Vigie n'est pas encore configuré",
+    'err.setup_too_many_attempts': "Trop d'essais : un nouveau code a été écrit dans le journal du conteneur",
+    'err.setup_code_invalid': 'Code de première configuration invalide ou expiré',
+    'err.password_too_short': 'Le mot de passe doit contenir au moins {min} caractères',
+    'err.setup_restart': 'Configuration à reprendre depuis le début',
+    'err.totp_incorrect': "Code incorrect : vérifie l'heure du téléphone et réessaie",
+    'err.login_locked': "Trop d'essais, connexion bloquée jusqu'à {until}", 'err.login_invalid': 'Mot de passe ou code incorrect',
+    'err.current_invalid': 'Mot de passe actuel ou code incorrect',
+    'err.server_not_found': 'Serveur introuvable', 'err.server_unknown': 'Serveur inconnu : {name}', 'err.service_not_found': 'Service introuvable',
+    'err.job_not_found': 'Demande introuvable', 'err.no_catalog': "L'agent de {server} n'a pas encore envoyé la liste de ses tâches",
+    'err.task_unknown': 'Tâche « {task} » inconnue sur {server}', 'err.interval_invalid': 'Intervalles autorisés (minutes) : {allowed}',
+    'err.server_name_invalid': 'Nom invalide : lettres, chiffres, point, tiret et souligné uniquement',
+    'err.server_exists': 'Un serveur « {name} » existe déjà', 'err.service_name_required': 'Nom de service obligatoire (100 caractères au plus)',
+    'err.service_exists': 'Un service « {name} » existe déjà sur {server}', 'err.params_rejected': 'Paramètres refusés',
+    'err.service_ref_unknown': '{param} : aucun service {id} sur {server}', 'err.job_kind_invalid': 'Type de demande invalide',
+    'err.cron_invalid': 'Expression cron invalide : 5 champs attendus, par exemple « 0 2 * * * »',
+    'err.no_successful_check': "Aucune vérification réussie pour ce service : lance d'abord un test",
+    'err.last_check_failed': 'La dernière vérification a échoué : corrige les paramètres et reteste',
+    'err.action_unknown': 'Action inconnue',
+    'err.param_unknown': 'Paramètre inconnu pour {task} : {name}', 'err.param_invalid': '{name} : valeur invalide pour le type « {type} »',
+    'err.param_required': '{name} est obligatoire',
+
+    // Built-in tasks: descriptions and parameter labels (the agent sends them in English)
+    'task.disk-usage': 'Espace disque', 'task.folder-sync': 'Synchronisation de dossier (rsync)',
+    'task.mariadb-dump': "Dump d'une base MariaDB / MySQL", 'task.openwrt-backup': 'Configuration OpenWRT',
+    'task.dir-cleanup': 'Nettoyage de fichiers temporaires', 'task.backup-borg': 'Sauvegarde Borg', 'task.db-dump': "Dump d'une base MariaDB / MySQL",
+    // Former names, still sent by agents older than 2.5
+    'task.library-sync': 'Synchronisation de dossier (rsync)', 'task.nextcloud-borg': 'Sauvegarde Nextcloud (Borg)',
+    'task.raid-check': 'État du RAID logiciel', 'task.reboot': 'Redémarrage du serveur',
+    'task.sqlite-backup': "Sauvegarde d'une base SQLite", 'param.DB_PATH': 'Fichier de la base SQLite',
+    'param.sqlite-backup.CONTAINER': "Conteneur de l'application (vide = fichier sur ce serveur)",
+    'param.sqlite-backup.LABEL': 'Préfixe des fichiers (défaut : nom du fichier de la base)',
+    'param.DELAY_SEC': 'Délai avant le redémarrage, en secondes', 'param.WAIT_MAX_MIN': 'Attente maximale des services en cours, en minutes',
+    'param.ONLY_IF_NEEDED': 'Seulement si le système le demande (Debian, Ubuntu)',
+    'param.PATHS': 'Points de montage à surveiller, séparés par des espaces', 'param.WARN_PCT': "Seuil d'attention (%)",
+    'param.CRIT_PCT': "Seuil d'erreur (%)", 'param.COMPAT_PATH': "Volume décrit dans l'ancien fichier texte",
+    'param.COMPAT_FILE': 'Ancien fichier « total utilisé libre » à maintenir',
+    'param.SOURCE_DIR': 'Dossier source', 'param.TARGET_DIR': 'Dossier de destination',
+    'param.mariadb-dump.TARGET_DIR': 'Dossier des sauvegardes', 'param.openwrt-backup.TARGET_DIR': 'Dossier des sauvegardes',
+    'param.TARGET_MOUNT': 'Point de montage à vérifier', 'param.library-sync.TARGET_MOUNT': 'Point de montage à vérifier avant de copier',
+    'param.nextcloud-borg.TARGET_MOUNT': 'Point de montage du dépôt',
+    'param.DELETE_EXTRA': 'Supprimer à destination ce qui a disparu de la source',
+    'param.CONTAINER': 'Conteneur de la base de données',
+    'param.PASSWORD_ENV': 'Mot de passe : variable dans le conteneur',
+    'param.mariadb-dump.PASSWORD_VAR': 'Mot de passe : variable du fichier de secrets',
+    'param.db-dump.PASSWORD_VAR': 'Mot de passe : variable du fichier de secrets',
+    'param.STOP_CONTAINERS': 'Conteneurs à arrêter pendant la sauvegarde',
+    'param.DB_HOST': 'Hôte dans le conteneur (vide = socket local)', 'param.nextcloud-borg.CONTAINER': 'Conteneur Nextcloud',
+    'param.DB_USER': 'Utilisateur de la base', 'param.DB_NAME': 'Base à sauvegarder', 'param.PASSWORD_VAR': 'Variable du fichier de secrets',
+    'param.LABEL': 'Préfixe des fichiers (défaut : nom de la base)', 'param.DAILY_DIR': 'Sous-dossier quotidien',
+    'param.WEEKLY_DIR': 'Sous-dossier hebdomadaire (lundi)', 'param.MONTHLY_DIR': 'Sous-dossier mensuel (le 1er)',
+    'param.KEEP_DAILY': 'Copies quotidiennes conservées', 'param.KEEP_WEEKLY': 'Copies hebdomadaires conservées',
+    'param.KEEP_MONTHLY': 'Copies mensuelles conservées (0 = toutes)',
+    'param.nextcloud-borg.KEEP_DAILY': 'Archives quotidiennes conservées', 'param.nextcloud-borg.KEEP_WEEKLY': 'Archives hebdomadaires conservées',
+    'param.nextcloud-borg.KEEP_MONTHLY': 'Archives mensuelles conservées',
+    'param.FILE_DIRS': 'Dossiers dont on purge les fichiers', 'param.WORK_DIRS': 'Dossiers dont on purge les sous-dossiers',
+    'param.MAX_AGE_MIN': 'Âge minimal avant suppression, en minutes',
+    'param.OCC_PATH': 'Nextcloud : chemin de occ dans le conteneur', 'param.OCC_USER': 'Nextcloud : utilisateur pour occ',
+    'param.nextcloud-borg.SOURCE_DIR': 'Dossier Nextcloud à archiver', 'param.REPO_DIR': 'Dépôt Borg (destination des archives)',
+    'param.PASSPHRASE_VAR': 'Variable contenant la phrase de passe Borg',
+    'param.DUMP_SERVICE': 'Service de dump de la base à lancer pendant la pause', 'param.COMPRESSION': 'Compression Borg',
+    'param.folder-sync.TARGET_MOUNT': 'Point de montage à vérifier avant de copier',
+    'param.backup-borg.TARGET_MOUNT': 'Point de montage du dépôt', 'param.backup-borg.CONTAINER': 'Nextcloud : conteneur à mettre en maintenance', 'param.backup-borg.KEEP_DAILY': 'Archives quotidiennes conservées', 'param.backup-borg.KEEP_WEEKLY': 'Archives hebdomadaires conservées', 'param.backup-borg.KEEP_MONTHLY': 'Archives mensuelles conservées', 'param.backup-borg.SOURCE_DIR': 'Dossiers à archiver',
+    'param.DEVICES': 'Volumes à contrôler (vide = tous ceux de /proc/mdstat)',
+  },
+};
+
+// ═══ Language ═══════════════════════════════════════════════════════════════
+const LANGS = Object.keys(I18N);
+function detectLang() {
+  let saved = null;
+  try { saved = localStorage.getItem('vigie.lang'); } catch (e) { /* storage unavailable */ }
+  if (saved && I18N[saved]) return saved;
+  for (const l of navigator.languages || [navigator.language || 'en']) {
+    const code = String(l).slice(0, 2).toLowerCase();
+    if (I18N[code]) return code;
+  }
+  return 'en';
+}
+let LANG = detectLang();
+
+/** Translation with {placeholders}; any missing key falls back to English, then to the key itself. */
+function t(key, params = {}) {
+  let s = I18N[LANG][key] ?? I18N.en[key] ?? key;
+  for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
+  return s;
+}
+const has = key => key in I18N[LANG];
+/** Plural forms: key_one / key_other. */
+const tn = (key, n, params = {}) => t(`${key}_${n > 1 ? 'other' : 'one'}`, { n, ...params });
+const locale = () => t('locale');
+
+/** Descriptions and labels sent by the agent (in English), translated when possible. */
+const taskLabel = (name, fallback) => has(`task.${name}`) ? t(`task.${name}`) : fallback;
+const paramLabel = (task, p) => has(`param.${task}.${p.name}`) ? t(`param.${task}.${p.name}`)
+  : has(`param.${p.name}`) ? t(`param.${p.name}`) : (p.label || p.name);
+
+function setLang(l) {
+  LANG = I18N[l] ? l : 'en';
+  try { localStorage.setItem('vigie.lang', LANG); } catch (e) { /* storage unavailable */ }
+  document.documentElement.lang = LANG;
+  renderChrome();
+  if (document.body.dataset.auth === 'ok') route(); else boot();
+}
+
+// ═══ Utilities ══════════════════════════════════════════════════════════════
+const $app = document.getElementById('app');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let clockSkew = 0;                                   // server / browser clock offset (s)
+const nowS = () => Math.floor(Date.now() / 1000) + clockSkew;
+
+/** Error message in the current language, from the code and parameters sent by the API.
+ *  When a language has no translation for a code, the API's English text is shown. */
+function apiErrorText(data, status) {
+  if (!data || !data.code) return data?.error || t('err.http', { status });
+  const p = { ...(data.params || {}) };
+  if (data.code === 'login_locked' && p.until_ts) p.until = hm(p.until_ts);
+  const sep = LANG === 'fr' ? ' : ' : ': ';
+  let text = has(`err.${data.code}`) ? t(`err.${data.code}`, p) : (data.error || data.code);
+  if (data.code === 'params_rejected' && Array.isArray(p.errors) && has('err.params_rejected')) {
+    text = t('err.params_rejected') + sep + p.errors.map(e => has(`err.${e.code}`) ? t(`err.${e.code}`, e.params) : e.code).join(' ; ');
+  }
+  return [text, data.detail].filter(Boolean).join(sep);
+}
+
+class AuthNeeded extends Error {}
+async function api(path, body) {
+  const opt = body === undefined ? { cache: 'no-store' }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Vigie': '1' }, body: JSON.stringify(body) };
+  const res = await fetch('api/' + path, opt);
+  const data = await res.json().catch(() => null);
+  if (data === null) throw new Error(t('err.bad_response', { status: res.status }));
+  if (res.status === 401 && data.auth) { boot(); throw new AuthNeeded(); }
+  if (!res.ok) throw new Error(apiErrorText(data, res.status));
+  return data;
+}
+
+function dur(s) {
+  if (s == null) return '';
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  if (s < 86400) return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+  const d = Math.floor(s / 86400), hh = Math.floor((s % 86400) / 3600), u = t('unit.day');
+  return hh ? `${d} ${u} ${hh} h` : `${d} ${u}`;
+}
+const hm = ts => new Date(ts * 1000).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+const day = ts => new Date(ts * 1000).toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short' });
+function ago(ts) {
+  if (!ts) return t('common.never');
+  const n = nowS(), s = n - ts;
+  if (s < 60) return t('time.just_now');
+  if (s < 3600) return t('time.min_ago', { n: Math.round(s / 60) });
+  const d = new Date(ts * 1000).toDateString();
+  if (d === new Date(n * 1000).toDateString()) return t('time.today_at', { t: hm(ts) });
+  if (d === new Date((n - 86400) * 1000).toDateString()) return t('time.yesterday_at', { t: hm(ts) });
+  return t('time.date_at', { d: day(ts), t: hm(ts) });
+}
+/** Full date and time, shown on hover. */
+const fullDate = ts => ts ? new Date(ts * 1000).toLocaleString(locale(), { dateStyle: 'full', timeStyle: 'medium' }) : '';
+const intervalLabel = m => m < 60 ? `${m} min` : m < 1440 ? `${m / 60} h` : '24 h';
+const every = m => t('interval.every', { i: intervalLabel(m) });
+
+function msg(kind, text) { return `<p class="msg ${kind}" role="${kind === 'err' ? 'alert' : 'status'}">${esc(text)}</p>`; }
+function showError(el, e) {
+  if (e instanceof AuthNeeded) return;
+  el.innerHTML = msg('err', e.message);
+}
+function reasonText(r) {
+  if (!r) return '';
+  if (r.code === 'summary') return r.params.text || '';
+  const p = r.params || {};
+  return t(`reason.${r.code}`, { d: dur(p.since ?? p.elapsed), limit: dur(p.limit) });
+}
+const delayText = d => d && d.code === 'fast' ? t('delay.fast') : t('delay.next_sync', { m: d?.minutes ?? '?' });
+
+// Waiting loops (agent, requests) stop as soon as the page changes
+let viewToken = 0;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function waitFor(token, fn, test, everyMs = 2500, maxMs = 45 * 60 * 1000) {
+  const end = Date.now() + maxMs;
+  while (token === viewToken && Date.now() < end) {
+    const r = await fn();
+    if (test(r)) return r;
+    await sleep(everyMs);
+  }
+  return null;
+}
+
+function copyButton(text) {
+  return `<button type="button" class="btn small" data-copy="${esc(text)}">${t('common.copy')}</button>`;
+}
+document.addEventListener('click', e => {
+  const c = e.target.closest('[data-copy]');
+  if (!c) return;
+  navigator.clipboard?.writeText(c.dataset.copy).then(() => { c.textContent = t('common.copied'); setTimeout(() => c.textContent = t('common.copy'), 1500); });
+});
+
+// ═══ Page chrome: navigation and language selector ══════════════════════════
+function renderChrome() {
+  document.documentElement.lang = LANG;
+  document.querySelector('nav.main').setAttribute('aria-label', t('nav.main'));
+  document.querySelectorAll('[data-nav]').forEach(a => { a.textContent = t(`nav.${a.dataset.nav}`); });
+  const sel = document.getElementById('lang');
+  sel.innerHTML = LANGS.map(l => `<option value="${l}" ${l === LANG ? 'selected' : ''}>${esc(I18N[l]['lang.name'])}</option>`).join('');
+  sel.setAttribute('aria-label', t('lang.label'));
+}
+document.getElementById('lang').addEventListener('change', e => setLang(e.target.value));
+
+function setAuthenticated(ok) {
+  document.body.dataset.auth = ok ? 'ok' : 'no';
+  document.querySelector('nav.main').hidden = !ok;
+  document.getElementById('stamp').hidden = !ok;
+}
+
+// ═══ Start-up and access ════════════════════════════════════════════════════
+async function boot() {
+  viewToken++;
+  setAuthenticated(false);
+  try {
+    const res = await fetch('api/auth/status', { cache: 'no-store' });
+    const st = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(apiErrorText(st, res.status));
+    if (st.state === 'setup') return renderSetup(st);
+    if (st.state === 'login') return renderLogin();
+    setAuthenticated(true);
+    route();
+  } catch (e) {
+    $app.innerHTML = `<section class="gate"><h1>${t('boot.down_title')}</h1>
+      ${msg('err', e.message)}
+      <p class="muted">${t('boot.down_hint')}</p>
+      <div class="actions"><button class="btn" id="retry">${t('common.retry')}</button></div></section>`;
+    document.getElementById('retry').onclick = boot;
+  }
+}
+
+function renderSetup(st) {
+  const min = st.password_min || 12;
+  $app.innerHTML = `<section class="gate">
+    <ol class="steps"><li class="current">${t('setup.step_password')}</li><li>${t('setup.step_mfa')}</li></ol>
+    <h1>${t('setup.title')}</h1>
+    <p>${t('setup.intro')}</p>
+    <form class="stack" id="f-setup" autocomplete="off">
+      <div class="field">
+        <label for="s-code">${t('setup.code')}</label>
+        <input type="text" id="s-code" required autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX">
+        <span class="help">${t('setup.code_help')}<br><code>docker logs 8213-vigie-api 2>&1 | grep "SETUP CODE"</code></span>
+      </div>
+      <input type="text" name="username" value="admin" autocomplete="username" hidden>
+      <div class="field"><label for="s-pw">${t('setup.password')}</label>
+        <input type="password" id="s-pw" required minlength="${min}" autocomplete="new-password">
+        <span class="help">${t('setup.password_help', { min })}</span></div>
+      <div class="field"><label for="s-pw2">${t('setup.confirm')}</label>
+        <input type="password" id="s-pw2" required minlength="${min}" autocomplete="new-password"></div>
+      <div id="s-msg"></div>
+      <div class="actions"><button class="btn primary" type="submit">${t('setup.continue')}</button></div>
+    </form></section>`;
+  document.getElementById('s-code').focus();
+  document.getElementById('f-setup').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const box = document.getElementById('s-msg');
+    const pw = document.getElementById('s-pw').value;
+    if (pw !== document.getElementById('s-pw2').value) { box.innerHTML = msg('err', t('setup.mismatch')); return; }
+    try {
+      renderSetupTotp(await api('auth/setup/start', { code: document.getElementById('s-code').value, password: pw }));
+    } catch (e) { showError(box, e); }
+  });
+}
+
+function renderSetupTotp(r) {
+  let qr = '';
+  try { const q = qrcode(0, 'M'); q.addData(r.uri); q.make(); qr = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch (e) { /* manual entry */ }
+  $app.innerHTML = `<section class="gate">
+    <ol class="steps"><li class="done">${t('setup.step_password')}</li><li class="current">${t('setup.step_mfa')}</li></ol>
+    <h1>${t('mfa.title')}</h1>
+    <p>${t('mfa.intro')}</p>
+    <div class="stack">
+      ${qr ? `<div class="qr" role="img" aria-label="${esc(t('mfa.qr_alt'))}">${qr}</div>` : ''}
+      <div class="field"><label>${t('mfa.manual')}</label>
+        <div class="secret">${esc(r.secret.replace(/(.{4})/g, '$1 ').trim())}</div>
+        <span class="help">${t('mfa.manual_help')}</span></div>
+      <form class="stack" id="f-totp">
+        <div class="field"><label for="t-code">${t('mfa.code')}</label>
+          <input class="code" type="text" id="t-code" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" required autocomplete="one-time-code"></div>
+        <div id="t-msg"></div>
+        <div class="actions"><button class="btn primary" type="submit">${t('mfa.submit')}</button></div>
+      </form>
+    </div></section>`;
+  document.getElementById('t-code').focus();
+  document.getElementById('f-totp').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    try { await api('auth/setup/finish', { totp: document.getElementById('t-code').value }); location.hash = '#/servers'; boot(); }
+    catch (e) { showError(document.getElementById('t-msg'), e); }
+  });
+}
+
+function renderLogin() {
+  $app.innerHTML = `<section class="gate">
+    <h1>${t('login.title')}</h1>
+    <p>${t('login.intro')}</p>
+    <form class="stack" id="f-login">
+      <input type="text" name="username" value="admin" autocomplete="username" hidden>
+      <div class="field"><label for="l-pw">${t('login.password')}</label>
+        <input type="password" id="l-pw" required autocomplete="current-password"></div>
+      <div class="field"><label for="l-code">${t('login.code')}</label>
+        <input class="code" type="text" id="l-code" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" required autocomplete="one-time-code"></div>
+      <label class="check"><input type="checkbox" id="l-remember"> ${t('login.remember')}</label>
+      <div id="l-msg"></div>
+      <div class="actions"><button class="btn primary" type="submit">${t('login.submit')}</button></div>
+    </form></section>`;
+  document.getElementById('l-pw').focus();
+  document.getElementById('f-login').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const box = document.getElementById('l-msg');
+    try {
+      await api('auth/login', { password: document.getElementById('l-pw').value, totp: document.getElementById('l-code').value,
+        remember: document.getElementById('l-remember').checked });
+      boot();
+    } catch (e) { showError(box, e); document.getElementById('l-code').value = ''; }
+  });
+}
+
+// ═══ Routing ════════════════════════════════════════════════════════════════
+function route() {
+  viewToken++;
+  clearInterval(dashTimer);
+  const h = location.hash.replace(/^#/, '') || '/';
+  const parts = h.split('/').filter(Boolean);
+  const nav = parts[0] === 'servers' || parts[0] === 'services' ? 'servers'
+    : parts[0] === 'audit' ? 'audit' : parts[0] === 'settings' ? 'settings' : 'dashboard';
+  document.querySelectorAll('[data-nav]').forEach(a => a.dataset.nav === nav ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
+  window.scrollTo(0, 0);
+  if (parts[0] === 'servers' && parts[1] === 'new') return viewServerNew();
+  if (parts[0] === 'servers' && parts[1] && parts[2] === 'service') return viewServiceNew(+parts[1]);
+  if (parts[0] === 'servers' && parts[1]) return viewServer(+parts[1]);
+  if (parts[0] === 'servers') return viewServers();
+  if (parts[0] === 'services' && parts[1]) return viewService(+parts[1]);
+  if (parts[0] === 'audit') return viewAudit();
+  if (parts[0] === 'settings') return viewSettings();
+  if (parts[0] && parts[0].startsWith('t-')) dashOpenAnchor = parts[0];
+  return viewDashboard();
+}
+window.addEventListener('hashchange', () => { if (document.body.dataset.auth === 'ok') route(); });
+// A link to the page already shown triggers no "hashchange": reload the view instead
+// (e.g. "Add another service" at the end of the service wizard).
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (a.getAttribute('href') === location.hash && document.body.dataset.auth === 'ok') {
+    e.preventDefault();
+    route();
+  }
+});
+
+// ═══ Dashboard ══════════════════════════════════════════════════════════════
+const HEALTH_LEVEL = { ok: 'ok', running: 'run', warning: 'warn', overrun: 'warn', unknown: 'warn', late: 'err', lost: 'err', error: 'err' };
+const RUN_LEVEL = { success: 'ok', warning: 'warn', error: 'err', running: 'run' };
+const dashOpen = new Set(), dashSelected = new Map();
+let dashState = null, dashTimer = null, dashOpenAnchor = null;
+
+async function viewDashboard() {
+  const token = viewToken;
+  if (!dashState) $app.innerHTML = `<p class="muted" style="padding:2rem 0">${t('common.loading')}</p>`;
+  const load = async () => {
+    try {
+      dashState = await api('state');
+      clockSkew = dashState.now - Math.floor(Date.now() / 1000);
+      if (token !== viewToken) return;
+      if (dashOpenAnchor) {
+        const tk = dashState.hosts.flatMap(h => h.tasks).find(x => x.anchor === dashOpenAnchor);
+        if (tk) dashOpen.add(String(tk.id));
+      }
+      renderDashboard();
+      document.getElementById('stamp').textContent = t('common.refreshed', { time: hm(dashState.now) });
+      if (dashOpenAnchor) { document.getElementById(dashOpenAnchor)?.scrollIntoView({ block: 'start' }); dashOpenAnchor = null; }
+    } catch (e) { if (token === viewToken) showError($app, e); }
+  };
+  await load();
+  dashTimer = setInterval(() => { if (!document.hidden && token === viewToken) load(); }, 30000);
+}
+
+function strip(tk) {
+  const hist = tk.history.slice(-24);
+  const lengths = hist.map(r => r.status === 'running' ? dashState.now - r.started_at : (r.duration ?? 0));
+  const max = Math.max(1, ...lengths);
+  const bars = hist.map((r, i) => {
+    const h = 15 + 85 * Math.log1p(lengths[i]) / Math.log1p(max);
+    return `<i class="s-${r.status}" style="height:${h.toFixed(0)}%" title="${esc(`${day(r.started_at)} ${hm(r.started_at)}, ${t(`run.${r.status}`)}, ${dur(lengths[i])}`)}"></i>`;
+  });
+  return `<span class="strip" aria-hidden="true">${Array(Math.max(0, 24 - hist.length)).fill('<i class="s-empty"></i>').join('')}${bars.join('')}</span>`;
+}
+
+function whenCell(tk) {
+  const last = tk.last;
+  if (!last) return `<span class="when">${t('dash.no_run')}<small>${t('dash.no_run_hint')}</small></span>`;
+  if (last.status === 'running') {
+    const el = dashState.now - last.started_at;
+    const bar = tk.typical ? `<span class="progress"><i style="width:${Math.min(100, 100 * el / tk.typical).toFixed(0)}%"></i></span>` : '';
+    const note = tk.reason ? reasonText(tk.reason) : (tk.previous ? t('dash.previous', { s: tk.previous.summary || t(`run.${tk.previous.status}`) }) : '');
+    const usual = tk.typical ? t('dash.usually', { d: dur(tk.typical) }) : t('dash.first_tracked');
+    return `<span class="when">${esc(t('dash.running_for', { d: dur(el), usual }))}${bar}<small>${esc(note)}</small></span>`;
+  }
+  return `<span class="when" title="${esc(fullDate(last.finished_at ?? last.started_at))}">${esc(t('dash.when', { ago: ago(last.finished_at ?? last.started_at), d: dur(last.duration) }))}<small>${esc(tk.reason ? reasonText(tk.reason) : (last.summary ?? ''))}</small></span>`;
+}
+
+function taskRow(tk) {
+  const lv = HEALTH_LEVEL[tk.health];
+  const k = String(tk.id), isOpen = dashOpen.has(k);
+  return `<article class="task lv-${lv}" id="${esc(tk.anchor)}" data-key="${k}">
+    <button class="task-head" type="button" aria-expanded="${isOpen}">
+      <span class="badge lv-${lv}">${t(`health.${tk.health}`)}</span>
+      <span class="name"><strong>${esc(tk.descr)}</strong><small>${esc(tk.task)}${tk.schedule ? `, ${esc(tk.schedule)}` : ''}</small></span>
+      ${whenCell(tk)}${strip(tk)}
+    </button>
+    <div class="task-body" ${isOpen ? '' : 'hidden'}>${isOpen ? taskBody(tk) : ''}</div>
+  </article>`;
+}
+
+function taskBody(tk) {
+  const runs = [...tk.history].reverse();
+  const cur = dashSelected.get(String(tk.id)) ?? runs[0]?.id;
+  const items = runs.map(r => {
+    const length = r.status === 'running' ? dashState.now - r.started_at : r.duration;
+    return `<li><button type="button" class="lv-${RUN_LEVEL[r.status]}" data-run="${r.id}" aria-current="${r.id === cur}">
+      <span class="d">${esc(t('time.date_at', { d: day(r.started_at), t: hm(r.started_at) }))}</span><span class="t">${dur(length)}</span><span class="r">${t(`run.${r.status}`)}</span></button></li>`;
+  }).join('');
+  return `<ul class="runs">${items || `<li class="muted">${t('dash.no_runs')}</li>`}</ul>
+    <div class="detail" data-detail="${cur ?? ''}">${cur ? `<p class="sum">${t('dash.loading_log')}</p>` : ''}
+    <p class="open-svc"><a href="#/services/${tk.id}">${t('dash.service_config')}</a></p></div>`;
+}
+
+async function loadRunDetail(article) {
+  const box = article.querySelector('.detail');
+  const id = box?.dataset.detail;
+  if (!id) return;
+  try {
+    const r = await api(`state?run=${encodeURIComponent(id)}`);
+    const metrics = Object.entries(r.metrics || {}).map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
+    const code = r.exit_code != null ? `<div><dt>${t('dash.exit_code')}</dt><dd>${r.exit_code}</dd></div>` : '';
+    box.innerHTML = `${r.summary ? `<p class="sum">${esc(r.summary)}</p>` : ''}
+      ${metrics || code ? `<dl class="meta">${code}${metrics}</dl>` : ''}
+      <pre class="log">${esc(r.log_tail || t('dash.empty_log'))}</pre>
+      <p class="open-svc"><a href="#/services/${r.service_id}">${t('dash.service_config')}</a></p>`;
+    const pre = box.querySelector('pre'); pre.scrollTop = pre.scrollHeight;
+  } catch (e) { showError(box, e); }
+}
+
+function agentLine(a) {
+  const pace = a.fast ? t('dash.pace_fast') : t('dash.pace', { i: intervalLabel(a.interval) });
+  return esc(t('dash.agent_line', { ago: ago(a.last_seen), pace }))
+    + (a.state === 'silent' ? ` <b class="badge lv-err">${t('dash.agent_silent')}</b>` : '');
+}
+
+function renderDashboard() {
+  const s = dashState;
+  if (!s.hosts.length) {
+    $app.innerHTML = `<section class="verdict"><h1>${t('dash.empty_title')}</h1>
+      <p class="sub">${t('dash.empty_sub')}</p>
+      <div class="actions"><a class="btn primary" href="#/servers/new">${t('dash.add_server')}</a></div></section>`;
+    return;
+  }
+  const all = s.hosts.flatMap(h => h.tasks);
+  const silent = s.hosts.filter(h => h.agent.state === 'silent');
+  const errs = all.filter(x => HEALTH_LEVEL[x.health] === 'err'), warns = all.filter(x => HEALTH_LEVEL[x.health] === 'warn');
+  const running = all.filter(x => x.health === 'running');
+  const issues = errs.length + warns.length + silent.length;
+  const agentItems = silent.map(h => `<li><span class="badge lv-err">${t('dash.agent_silent')}</span><span><a href="#/servers/${h.agent.id}">${esc(h.host)}</a>
+      <span class="why">${esc(h.agent.last_seen ? t('dash.last_sync', { ago: ago(h.agent.last_seen) }) : t('dash.never_synced'))}</span></span></li>`).join('');
+  const list = agentItems + [...errs, ...warns, ...running].map(x => {
+    const lv = HEALTH_LEVEL[x.health];
+    const why = x.reason ? reasonText(x.reason) : (x.health === 'running' ? t('dash.since', { d: dur(s.now - x.last.started_at) }) : '');
+    return `<li><span class="badge lv-${lv}">${t(`health.${x.health}`)}</span><span><a href="#/${esc(x.anchor)}" data-jump="${x.id}">${esc(x.descr)}</a>
+      <span class="why">${esc(t('dash.on_host', { host: x.host }))}${why ? ` : ${esc(why)}` : ''}</span></span></li>`;
+  }).join('');
+  const services = tn('dash.services', all.length), servers = tn('dash.servers', s.hosts.length);
+  $app.innerHTML = `<section class="verdict">
+      <h1>${issues === 0 ? t('dash.all_good') : esc(tn('dash.issues', issues))}</h1>
+      <p class="sub">${esc(running.length ? t('dash.sub_running', { services, servers, n: running.length }) : t('dash.sub', { services, servers }))}</p>
+      ${list ? `<ul class="attention">${list}</ul>` : ''}</section>
+    ${s.hosts.map(h => `<section class="host" id="h-${h.agent.id}">
+      <h2><a href="#/servers/${h.agent.id}" style="text-decoration:none">${esc(h.host)}</a> <span>${esc(tn('dash.host_services', h.tasks.length))}, ${agentLine(h.agent)}</span></h2>
+      ${h.tasks.length ? h.tasks.map(taskRow).join('') : `<p class="none">${t('dash.no_service')} <a href="#/servers/${h.agent.id}/service">${t('dash.add_service')}</a></p>`}
+    </section>`).join('')}`;
+  document.querySelectorAll('.task').forEach(a => { if (dashOpen.has(a.dataset.key)) loadRunDetail(a); });
+}
+
+$app.addEventListener('click', e => {
+  if (!dashState || !document.querySelector('.verdict')) return;
+  const jump = e.target.closest('[data-jump]');
+  if (jump) { dashOpen.add(jump.dataset.jump); return; }
+  const head = e.target.closest('.task-head');
+  if (head) {
+    const k = head.closest('.task').dataset.key;
+    dashOpen.has(k) ? dashOpen.delete(k) : dashOpen.add(k);
+    renderDashboard();
+    document.querySelector(`[data-key="${CSS.escape(k)}"] .task-head`)?.focus();
+    return;
+  }
+  const run = e.target.closest('[data-run]');
+  if (run) {
+    const art = run.closest('.task');
+    dashSelected.set(art.dataset.key, Number(run.dataset.run));
+    art.querySelectorAll('[data-run]').forEach(b => b.setAttribute('aria-current', b === run));
+    art.querySelector('.detail').dataset.detail = run.dataset.run;
+    loadRunDetail(art);
+  }
+});
+
+// ═══ Servers ════════════════════════════════════════════════════════════════
+const AGENT_LEVEL = { ok: 'ok', silent: 'err', pending: 'idle' };
+
+async function viewServers() {
+  $app.innerHTML = `<div class="page-head"><h1>${t('servers.title')}</h1><p>${t('servers.intro')}</p></div><div id="list"></div>`;
+  try {
+    const rows = await api('admin/servers');
+    const list = document.getElementById('list');
+    list.innerHTML = (rows.length ? `<div class="rows servers">${rows.map(s => `<a href="#/servers/${s.id}">
+        <span class="badge lv-${AGENT_LEVEL[s.agent.state]}">${t(`agent.${s.agent.state}`)}</span>
+        <span><strong>${esc(s.name)}</strong><small>${esc(s.descr || s.os || '')}</small></span>
+        <span class="muted">${esc(s.enrolled ? t('servers.synced', { ago: ago(s.agent.last_seen), i: intervalLabel(s.interval) })
+          : (s.enroll_pending ? t('servers.enroll_pending') : t('servers.not_enrolled')))}</span>
+        <span class="muted">${esc(t('servers.enabled', { a: s.active, n: s.services }))}</span></a>`).join('')}</div>`
+      : `<p class="empty-note">${t('servers.none')}</p>`)
+      + `<div class="actions"><a class="btn primary" href="#/servers/new">${t('servers.add')}</a></div>`;
+  } catch (e) { showError(document.getElementById('list'), e); }
+}
+
+const serverSteps = current => `<ol class="steps">${['wiz.step_info', 'wiz.step_install', 'wiz.step_test']
+  .map((k, i) => `<li class="${i < current ? 'done' : i === current ? 'current' : ''}">${t(k)}</li>`).join('')}</ol>`;
+const INTERVALS = [1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 240, 360, 720, 1440];
+
+// Wizard: server information → install the agent → agent connection test
+function viewServerNew() {
+  $app.innerHTML = `<div class="page-head"><div class="crumb"><a href="#/servers">${t('servers.title')}</a></div><h1>${t('wiz.server_title')}</h1></div>
+    ${serverSteps(0)}
+    <form class="stack" id="f-srv">
+      <div class="field"><label for="n-name">${t('wiz.name')}</label>
+        <input type="text" id="n-name" required pattern="[A-Za-z0-9._\\-]{1,64}" spellcheck="false" placeholder="debian">
+        <span class="help">${t('wiz.name_help')}</span></div>
+      <div class="field"><label for="n-descr">${t('wiz.descr')} <span class="opt">${t('common.optional')}</span></label>
+        <input type="text" id="n-descr" maxlength="200"></div>
+      <div class="field"><label for="n-int">${t('wiz.interval')}</label>
+        <select id="n-int">${INTERVALS.map(i => `<option value="${i}" ${i === 15 ? 'selected' : ''}>${esc(every(i))}</option>`).join('')}</select>
+        <span class="help">${t('wiz.interval_help')}</span></div>
+      <div id="n-msg"></div>
+      <div class="actions"><button class="btn primary" type="submit">${t('wiz.create')}</button><a class="btn" href="#/servers">${t('common.cancel')}</a></div>
+    </form>`;
+  document.getElementById('n-name').focus();
+  document.getElementById('f-srv').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    try {
+      const r = await api('admin/servers', { name: document.getElementById('n-name').value.trim(),
+        descr: document.getElementById('n-descr').value, interval: +document.getElementById('n-int').value });
+      history.replaceState(null, '', `#/servers/${r.id}`);
+      viewToken++;
+      enrollPanel(r.id, r);
+    } catch (e) { showError(document.getElementById('n-msg'), e); }
+  });
+}
+
+/** Steps 2 and 3: install command, then wait for the agent's first contact. */
+async function enrollPanel(serverId, codeInfo) {
+  const token = viewToken;
+  const srv = await api(`admin/servers/${serverId}`).catch(e => { showError($app, e); return null; });
+  if (!srv) return;
+  clockSkew = srv.now - Math.floor(Date.now() / 1000);
+  const issuedAt = nowS();
+  const url = srv.public_url || 'http://<vigie-address>';
+  const commands = `# ${t('enroll.cmd_where', { server: srv.name })}
+cat > vigie.conf <<EOF
+STATE_DIR="$(pwd)/state"          # ${t('enroll.cmd_state')}
+SECRETS_FILE="/root/.env"         # ${t('enroll.cmd_secrets')}
+EOF
+chmod 700 vigie
+./vigie enroll ${url} ${codeInfo.code}`;
+  $app.innerHTML = `<div class="page-head"><div class="crumb"><a href="#/servers">${t('servers.title')}</a></div><h1>${esc(srv.name)}</h1></div>
+    ${serverSteps(1)}
+    <div class="stack" style="max-width:52rem">
+      <div class="field"><label>${t('enroll.code')}</label>
+        <div class="bigcode">${esc(codeInfo.code)}</div>
+        <span class="help" id="e-exp"></span></div>
+      <div class="field"><label>${t('enroll.on_server')}</label>
+        <div class="cmd-wrap"><pre class="cmd">${esc(commands)}</pre>${copyButton(commands)}</div>
+        ${srv.public_url ? '' : `<span class="help">${t('enroll.no_public_url')}</span>`}</div>
+      <div id="e-state"><p class="waiting">${t('enroll.waiting')}</p></div>
+    </div>`;
+  const expEl = document.getElementById('e-exp');
+  const tick = setInterval(() => {
+    if (token !== viewToken) return clearInterval(tick);
+    const left = codeInfo.expires - nowS();
+    expEl.textContent = left > 0 ? t('enroll.valid_for', { d: dur(left) }) : t('enroll.expired_short');
+  }, 1000);
+
+  const enrolled = r => r && r.enrolled_at && r.enrolled_at >= issuedAt - 5;
+  const done = await waitFor(token, () => api(`admin/servers/${serverId}`).catch(() => null),
+    r => enrolled(r) || nowS() > codeInfo.expires, 3000);
+  clearInterval(tick);
+  if (token !== viewToken || !done) return;
+  const box = document.getElementById('e-state');
+  if (!enrolled(done)) {
+    box.innerHTML = `${msg('err', t('enroll.expired'))}
+      <div class="actions"><button class="btn primary" id="e-retry">${t('enroll.retry')}</button><a class="btn" href="#/servers/${serverId}">${t('common.finish')}</a></div>`;
+    document.getElementById('e-retry').onclick = async () => { viewToken++; enrollPanel(serverId, await api(`admin/servers/${serverId}/enroll`, {})); };
+    return;
+  }
+  document.querySelector('ol.steps').outerHTML = serverSteps(3);
+  const f = done.facts || {};
+  box.innerHTML = `${msg('ok', t('enroll.connected', { server: done.name }))}
+    <dl class="facts">
+      <dt>${t('facts.system')}</dt><dd>${esc(f.os || '?')} <span class="muted">${esc(f.kernel || '')}</span></dd>
+      <dt>${t('facts.tasks')}</dt><dd><div class="chips">${done.catalog.map(x => `<span class="chip">${esc(x.name)}</span>`).join('')}</div></dd>
+      <dt>${t('facts.containers')}</dt><dd><div class="chips">${(f.containers || []).map(c => `<span class="chip">${esc(c)}</span>`).join('') || `<span class="muted">${t('common.none')}</span>`}</div></dd>
+    </dl>
+    <div class="actions"><a class="btn primary" href="#/servers/${serverId}/service">${t('dash.add_service')}</a><a class="btn" href="#/servers/${serverId}">${t('common.finish')}</a></div>`;
+}
+
+const chips = arr => `<div class="chips">${(arr || []).map(m => `<span class="chip">${esc(m)}</span>`).join('') || '—'}</div>`;
+
+async function viewServer(id) {
+  const token = viewToken;
+  $app.innerHTML = `<p class="muted" style="padding:2rem 0">${t('common.loading')}</p>`;
+  let s;
+  try { s = await api(`admin/servers/${id}`); } catch (e) { return showError($app, e); }
+  if (token !== viewToken) return;
+  clockSkew = s.now - Math.floor(Date.now() / 1000);
+  const f = s.facts || {};
+  const agentState = !s.enrolled_at ? ['pending', 'idle'] : s.revoked ? ['revoked', 'err']
+    : (!s.last_seen || s.now - s.last_seen > 3 * s.interval * 60 + 120) ? ['silent', 'err'] : ['ok', 'ok'];
+  const svcRows = s.services.map(v => {
+    const st = !v.enabled ? [t('server.svc_disabled'), 'idle'] : v.last_status ? [t(`run.${v.last_status}`), RUN_LEVEL[v.last_status]] : [t('server.svc_scheduled'), 'run'];
+    return `<a href="#/services/${v.id}"><span class="badge lv-${st[1]}">${st[0]}</span>
+      <span><strong>${esc(v.name)}</strong><small>${esc(v.task)}</small></span>
+      <span class="muted">${v.schedule ? esc(v.schedule) : t('server.not_scheduled')}</span>
+      <span class="muted" title="${esc(fullDate(v.last_run))}">${v.last_run ? esc(ago(v.last_run)) : t('server.never_run')}</span></a>`;
+  }).join('');
+  $app.innerHTML = `<div class="page-head"><div class="crumb"><a href="#/servers">${t('servers.title')}</a></div>
+      <h1>${esc(s.name)} <span class="badge lv-${agentState[1]}" style="vertical-align:middle">${t(`agent.${agentState[0]}`)}</span></h1>
+      <p>${esc(s.descr || '')}</p></div>
+    <div id="s-msg"></div>
+    ${f.user && f.user !== 'root' ? msg('err', t('server.not_root', { user: f.user })) : ''}
+    ${s.sync_errors.length ? `<div class="msg err"><strong>${t('server.rejected')}</strong><br>${s.sync_errors.map(esc).join('<br>')}</div>` : ''}
+    <h2 class="section">${t('server.services')}</h2>
+    <div id="svc-list">${svcRows ? `<div class="rows services">${svcRows}</div>` : `<p class="empty-note">${t('server.no_services')}</p>`}
+    <div class="actions">${s.enrolled_at && !s.revoked ? `<a class="btn primary" href="#/servers/${id}/service">${t('dash.add_service')}</a>` : ''}
+      ${s.services.length > 1 ? `<button class="btn" type="button" id="a-order">${t('order.edit')}</button>` : ''}</div></div>
+
+    <h2 class="section">${t('server.agent')}</h2>
+    <div class="split">
+      <dl class="facts">
+        <dt>${t('facts.system')}</dt><dd>${esc(f.os || '—')} <span class="muted">${esc(f.kernel || '')}</span></dd>
+        <dt>${t('facts.version')}</dt><dd>${esc(s.agent_version || '—')}</dd>
+        ${f.boot_time ? `<dt>${t('facts.boot')}</dt><dd title="${esc(fullDate(f.boot_time))}">${esc(ago(f.boot_time))}</dd>` : ''}
+        <dt>${t('facts.last_sync')}</dt><dd>${esc(ago(s.last_seen))}${s.fast_until > s.now ? ` <span class="muted">${esc(t('facts.fast_until', { t: hm(s.fast_until) }))}</span>`
+          : s.fast_pending ? ` <span class="muted">${esc(t('facts.fast_pending'))}</span>` : ''}</dd>
+        <dt>${t('facts.enrolled')}</dt><dd>${s.enrolled_at ? esc(t('time.date_at', { d: day(s.enrolled_at), t: hm(s.enrolled_at) })) : t('facts.no')}${s.enroll_expires ? ` <span class="muted">${t('facts.code_pending')}</span>` : ''}</dd>
+      </dl>
+      <form class="stack" id="f-edit">
+        <div class="field"><label for="e-descr">${t('wiz.descr')}</label><input type="text" id="e-descr" maxlength="200" value="${esc(s.descr)}"></div>
+        <div class="field"><label for="e-int">${t('wiz.interval')}</label>
+          <select id="e-int">${s.intervals.map(i => `<option value="${i}" ${i === s.interval ? 'selected' : ''}>${esc(every(i))}</option>`).join('')}</select></div>
+        <div class="actions" style="margin-top:0"><button class="btn" type="submit">${t('common.save')}</button></div>
+      </form>
+    </div>
+    <div class="actions">
+      <button class="btn" id="a-fast">${t('server.fast')}</button>
+      <button class="btn" id="a-enroll">${s.enrolled_at ? t('server.reenroll') : t('server.new_code')}</button>
+      ${s.enrolled_at && !s.revoked ? `<button class="btn danger" id="a-revoke">${t('server.revoke')}</button>` : ''}
+      <button class="btn danger" id="a-delete">${t('server.delete')}</button>
+    </div>
+
+    <h2 class="section">${t('server.info')}</h2>
+    <dl class="facts">
+      <dt>${t('facts.mounts')}</dt><dd>${chips(f.mounts)}</dd>
+      <dt>${t('facts.containers')}</dt><dd>${chips(f.containers)}</dd>
+      <dt>${t('facts.secrets')}</dt><dd>${chips(f.secret_names)}<span class="muted">${t('facts.secrets_note')}</span></dd>
+      <dt>${t('facts.commands')}</dt><dd>${chips(f.commands)}</dd>
+    </dl>`;
+  const out = document.getElementById('s-msg');
+  const act = async (fn, okText) => {
+    try { await fn(); out.innerHTML = msg('ok', okText); setTimeout(() => token === viewToken && viewServer(id), 900); }
+    catch (e) { showError(out, e); }
+    window.scrollTo(0, 0);
+  };
+  document.getElementById('a-order')?.addEventListener('click', () => reorderPanel(s, token, out));
+  document.getElementById('f-edit').addEventListener('submit', ev => { ev.preventDefault();
+    act(() => api(`admin/servers/${id}`, { descr: document.getElementById('e-descr').value, interval: +document.getElementById('e-int').value }), t('server.saved')); });
+  document.getElementById('a-fast').onclick = () => act(() => api(`admin/servers/${id}/fast`, { minutes: 15 }), t('server.fast_done', { i: intervalLabel(s.interval) }));
+  document.getElementById('a-enroll').onclick = async () => {
+    if (s.enrolled_at && !confirm(t('server.confirm_code'))) return;
+    try { const r = await api(`admin/servers/${id}/enroll`, {}); viewToken++; enrollPanel(id, r); } catch (e) { showError(out, e); }
+  };
+  document.getElementById('a-revoke')?.addEventListener('click', () => {
+    if (confirm(t('server.confirm_revoke', { server: s.name }))) act(() => api(`admin/servers/${id}/revoke`, {}), t('server.revoked'));
+  });
+  document.getElementById('a-delete').onclick = async () => {
+    if (prompt(t('server.confirm_delete', { server: s.name })) !== s.name) return;
+    try { await api(`admin/servers/${id}/delete`, {}); location.hash = '#/servers'; } catch (e) { showError(out, e); }
+  };
+}
+
+/** Sort key of a cron expression: hour, then minute. Hourly jobs first, unscheduled services last. */
+function cronKey(expr) {
+  if (!expr) return [99, 99];
+  const [m, h] = expr.split(' ');
+  const first = f => { const n = parseInt(String(f).replace(/^\*\/?/, ''), 10); return Number.isNaN(n) ? 0 : n; };
+  return [h.startsWith('*') ? -1 : first(h), first(m)];
+}
+
+/** Service ordering: arrows, "sort by time", then a single save. */
+function reorderPanel(s, token, out) {
+  let order = [...s.services];
+  const box = document.getElementById('svc-list');
+  const oldAgent = s.agent_version && s.agent_version.localeCompare('2.3', undefined, { numeric: true }) < 0;
+  const render = () => {
+    box.innerHTML = `<p class="muted">${t('order.intro')}</p>
+      ${oldAgent ? msg('info', t('order.agent_old', { v: s.agent_version })) : ''}
+      <div class="rows reorder">${order.map((v, i) => `<div class="row">
+        <span class="pos">${i + 1}</span>
+        <span><strong>${esc(v.name)}</strong><small>${esc(v.task)}</small></span>
+        <span class="muted sched"><code>${v.schedule ? esc(v.schedule) : t('server.not_scheduled')}</code></span>
+        <span class="moves">
+          <button class="btn small" type="button" data-move="${i}" data-dir="-1" aria-label="${esc(t('order.up') + ' : ' + v.name)}" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="btn small" type="button" data-move="${i}" data-dir="1" aria-label="${esc(t('order.down') + ' : ' + v.name)}" ${i === order.length - 1 ? 'disabled' : ''}>↓</button>
+        </span></div>`).join('')}</div>
+      <div class="actions">
+        <button class="btn primary" type="button" id="o-save">${t('order.save')}</button>
+        <button class="btn" type="button" id="o-sort">${t('order.sort')}</button>
+        <button class="btn" type="button" id="o-cancel">${t('common.cancel')}</button></div>`;
+    box.querySelectorAll('[data-move]').forEach(b => b.onclick = () => {
+      const i = +b.dataset.move, j = i + +b.dataset.dir;
+      [order[i], order[j]] = [order[j], order[i]];
+      render();
+      box.querySelector(`[data-move="${j}"][data-dir="${b.dataset.dir}"]`)?.focus()
+        || box.querySelector(`[data-move="${j}"]:not([disabled])`)?.focus();
+    });
+    document.getElementById('o-sort').onclick = () => {
+      order = order.map((v, i) => ({ v, i, k: cronKey(v.enabled ? v.schedule : null) }))
+        .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map(x => x.v);
+      render();
+    };
+    document.getElementById('o-cancel').onclick = () => viewServer(s.id);
+    document.getElementById('o-save').onclick = async () => {
+      try {
+        await api(`admin/servers/${s.id}/order`, { ids: order.map(v => v.id) });
+        if (token !== viewToken) return;
+        await viewServer(s.id);
+        document.getElementById('s-msg').innerHTML = msg('ok', t('order.saved'));
+      } catch (e) { showError(out, e); window.scrollTo(0, 0); }
+    };
+  };
+  render();
+}
+
+// ═══ Services: parameter form generated from the task declaration ═══════════
+function paramField(task, p, value, srv) {
+  const id = `p-${p.name}`;
+  const req = p.required && !p.default;
+  const ph = p.default ? t('param.default', { v: p.default }) : '';
+  let input;
+  if (p.type === 'bool') {
+    const v = value || p.default || 'no';
+    input = `<select id="${id}" name="${p.name}"><option value="no" ${v === 'no' ? 'selected' : ''}>${t('param.no')}</option><option value="yes" ${v === 'yes' ? 'selected' : ''}>${t('param.yes')}</option></select>`;
+  } else if (p.type === 'service') {
+    input = `<select id="${id}" name="${p.name}"><option value="">${t('param.none')}</option>${srv.services.map(x => `<option value="${x.id}" ${String(x.id) === String(value) ? 'selected' : ''}>${esc(x.name)} (${esc(x.task)})</option>`).join('')}</select>`;
+  } else {
+    // *_ENV variables live in the container, not in the secrets file: no secret names to suggest
+    const list = p.type === 'varname' ? (p.name.endsWith('_ENV') ? '' : 'dl-secrets') : (p.type === 'path' || p.type === 'paths') ? 'dl-mounts'
+      : (p.type === 'name' && /CONTAINER/.test(p.name)) ? 'dl-containers' : '';
+    input = `<input type="${p.type === 'int' ? 'number' : 'text'}" id="${id}" name="${p.name}" value="${esc(value ?? '')}" placeholder="${esc(ph)}"
+      ${req ? 'required' : ''} ${list ? `list="${list}"` : ''} ${p.type === 'int' ? 'min="0"' : 'spellcheck="false"'} autocomplete="off">`;
+  }
+  const helpKey = [`param.help.${task}.${p.name}`, `param.help.${p.name}`].find(k => has(k) || k in I18N.en);
+  const help = helpKey ? t(helpKey) : ['path', 'paths', 'varname', 'names'].includes(p.type) ? t(`param.help_${p.type}`) : '';
+  return `<div class="field"><label for="${id}">${esc(paramLabel(task, p))} ${req ? '' : `<span class="opt">${t('common.optional')}</span>`}<span class="tech">${esc(p.name)}</span></label>
+    ${input}${help ? `<span class="help">${help}</span>` : ''}</div>`;
+}
+function datalists(srv) {
+  const f = srv.facts || {};
+  const dl = (id, arr) => `<datalist id="${id}">${(arr || []).map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+  return dl('dl-secrets', f.secret_names) + dl('dl-mounts', f.mounts) + dl('dl-containers', f.containers);
+}
+function readParams(form) {
+  const out = {};
+  form.querySelectorAll('[name]').forEach(el => { if (/^[A-Z_][A-Z0-9_]*$/.test(el.name)) out[el.name] = el.value.trim(); });
+  return out;
+}
+
+// Wizard: task → parameters → test (loops back on failure) → scheduling
+async function viewServiceNew(serverId) {
+  const token = viewToken;
+  let srv;
+  try { srv = await api(`admin/servers/${serverId}`); } catch (e) { return showError($app, e); }
+  if (token !== viewToken) return;
+  const head = step => `<div class="page-head"><div class="crumb"><a href="#/servers">${t('servers.title')}</a> › <a href="#/servers/${serverId}">${esc(srv.name)}</a></div><h1>${t('svc.title')}</h1></div>
+    <ol class="steps">${['svc.step_task', 'svc.step_params', 'svc.step_test', 'svc.step_schedule'].map((k, i) => `<li class="${i < step ? 'done' : i === step ? 'current' : ''}">${t(k)}</li>`).join('')}</ol>`;
+  if (!srv.catalog.length) { $app.innerHTML = head(0) + msg('err', t('svc.no_catalog')); return; }
+  $app.innerHTML = head(0) + `<div class="tasks-pick">${srv.catalog.map(x => `<button type="button" data-task="${esc(x.name)}"><strong>${esc(taskLabel(x.name, x.descr))}</strong><small>${esc(x.name)}</small></button>`).join('')}</div>`;
+  $app.querySelectorAll('[data-task]').forEach(b => b.onclick = () => stepParams(srv.catalog.find(x => x.name === b.dataset.task)));
+
+  let serviceId = null, lastValues = {}, lastName = '';
+  function stepParams(def) {
+    $app.innerHTML = head(1) + `<form class="stack" id="f-svc">
+        <div class="field"><label for="p-name">${t('svc.name')}</label>
+          <input type="text" id="p-name" required maxlength="100" value="${esc(lastName || taskLabel(def.name, def.descr))}">
+          <span class="help">${t('svc.name_help', { task: esc(def.name) })}</span></div>
+        ${def.params.map(p => paramField(def.name, p, lastValues[p.name], srv)).join('')}
+        ${datalists(srv)}
+        <div id="p-msg"></div>
+        <div class="actions"><button class="btn primary" type="submit">${serviceId ? t('svc.save_retest') : t('svc.save_test')}</button>
+          ${serviceId ? '' : `<button class="btn" type="button" id="p-back">${t('svc.change_task')}</button>`}</div></form>`;
+    document.getElementById('p-back')?.addEventListener('click', () => viewServiceNew(serverId));
+    document.getElementById('f-svc').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      lastValues = readParams(ev.target); lastName = document.getElementById('p-name').value.trim();
+      try {
+        if (serviceId) await api(`admin/services/${serviceId}`, { name: lastName, params: lastValues });
+        else serviceId = (await api('admin/services', { server_id: serverId, task: def.name, name: lastName, params: lastValues })).id;
+        stepTest(def);
+      } catch (e) { showError(document.getElementById('p-msg'), e); }
+    });
+  }
+
+  async function stepTest(def) {
+    const tok = ++viewToken;
+    $app.innerHTML = head(2) + `<div id="t-box"><p class="waiting">${t('svc.sending')}</p></div>`;
+    const box = document.getElementById('t-box');
+    const ok = await runJob(tok, serviceId, 'check', box);
+    if (tok !== viewToken || ok === null) return;
+    if (ok) {
+      box.insertAdjacentHTML('beforeend', `<div class="actions"><button class="btn primary" id="t-next">${t('svc.to_schedule')}</button>
+        <a class="btn" href="#/services/${serviceId}">${t('svc.finish_unscheduled')}</a></div>`);
+      document.getElementById('t-next').onclick = () => stepSchedule();
+    } else {
+      box.insertAdjacentHTML('beforeend', `<div class="actions"><button class="btn primary" id="t-edit">${t('svc.edit_params')}</button>
+        <button class="btn" id="t-retry">${t('svc.retry')}</button><a class="btn" href="#/services/${serviceId}">${t('common.finish')}</a></div>`);
+      document.getElementById('t-edit').onclick = () => stepParams(def);
+      document.getElementById('t-retry').onclick = () => stepTest(def);
+    }
+  }
+
+  function stepSchedule() {
+    viewToken++;
+    $app.innerHTML = head(3) + `<div class="stack" style="max-width:40rem">${scheduleForm('')}<div id="c-msg"></div>
+      <div class="actions"><button class="btn primary" id="c-save">${t('svc.schedule_enable')}</button><a class="btn" href="#/services/${serviceId}">${t('svc.finish_unscheduled')}</a></div></div>`;
+    bindScheduleForm();
+    document.getElementById('c-save').onclick = async () => {
+      try {
+        const cron = currentCron();
+        await api(`admin/services/${serviceId}/schedule`, { schedule: cron });
+        $app.innerHTML = head(4) + msg('ok', t('svc.scheduled_done', { cron }))
+          + `<div class="actions"><a class="btn primary" href="#/servers/${serverId}/service">${t('svc.add_another')}</a><a class="btn" href="#/servers/${serverId}">${t('svc.back_server')}</a></div>`;
+      } catch (e) { showError(document.getElementById('c-msg'), e); }
+    };
+  }
+}
+
+/** Sends a request (check or run) and shows its result. true / false / null (abandoned). */
+async function runJob(token, serviceId, kind, box) {
+  let job;
+  try { job = await api(`admin/services/${serviceId}/${kind === 'check' ? 'test' : 'run'}`, {}); }
+  catch (e) { showError(box, e); return false; }
+  box.innerHTML = `<p class="waiting">${esc(t('svc.sent', { when: delayText(job.delay) }))}</p>`
+    + (job.delay?.code === 'next_sync' ? `<p class="muted">${t('svc.sync_hint')}</p>` : '');
+  const r = await waitFor(token, () => api(`admin/jobs/${job.id}`).catch(() => null),
+    j => j && (j.state === 'done' || j.state === 'expired'), 2500, 7 * 3600 * 1000);
+  if (token !== viewToken || !r) return null;
+  const ok = r.state === 'done' && +r.result_ok === 1;
+  const label = r.state === 'expired' ? t('svc.no_answer')
+    : kind === 'check' ? t(ok ? 'svc.check_ok' : 'svc.check_failed') : t(ok ? 'svc.run_ok' : 'svc.run_failed');
+  box.innerHTML = msg(ok ? 'ok' : 'err', label) + (r.output ? `<pre class="log">${esc(r.output)}</pre>` : '');
+  return ok;
+}
+
+// Scheduling: common forms, or a free cron expression
+function scheduleForm(current) {
+  const days = t('cron.days').split(',');
+  return `<div class="field"><label for="c-kind">${t('cron.frequency')}</label>
+      <select id="c-kind">${['daily', 'weekly', 'monthly', 'hourly', 'custom'].map(k => `<option value="${k}">${t(`cron.${k}`)}</option>`).join('')}</select></div>
+    <div class="field" data-for="weekly"><label for="c-dow">${t('cron.day')}</label><select id="c-dow">${days.map((d, i) => `<option value="${i}" ${i === 6 ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></div>
+    <div class="field" data-for="monthly"><label for="c-dom">${t('cron.dom')}</label><input type="number" id="c-dom" min="1" max="28" value="1"></div>
+    <div class="field" data-for="daily weekly monthly"><label for="c-time">${t('cron.time')}</label><input type="text" id="c-time" value="02:00" pattern="[0-2]?[0-9]:[0-5][0-9]" style="max-width:8rem"></div>
+    <div class="field" data-for="hourly"><label for="c-min">${t('cron.minute')}</label><input type="number" id="c-min" min="0" max="59" value="0" style="max-width:8rem"></div>
+    <div class="field" data-for="custom"><label for="c-expr">${t('cron.expr')}</label><input type="text" id="c-expr" value="${esc(current || '0 2 * * *')}" spellcheck="false">
+      <span class="help">${t('cron.expr_help')}</span></div>
+    <p class="muted">${t('cron.preview')} <code id="c-preview"></code></p>`;
+}
+function currentCron() {
+  const kind = document.getElementById('c-kind').value;
+  const [h, m] = (document.getElementById('c-time').value.match(/^(\d{1,2}):(\d{2})$/) || [0, '2', '0']).slice(1).map(Number);
+  return { daily: `${m} ${h} * * *`, weekly: `${m} ${h} * * ${document.getElementById('c-dow').value}`,
+    monthly: `${m} ${h} ${document.getElementById('c-dom').value} * *`, hourly: `${document.getElementById('c-min').value} * * * *`,
+    custom: document.getElementById('c-expr').value.trim().replace(/\s+/g, ' ') }[kind];
+}
+function bindScheduleForm(current) {
+  const kind = document.getElementById('c-kind');
+  if (current) kind.value = 'custom';
+  const refresh = () => {
+    document.querySelectorAll('[data-for]').forEach(el => el.hidden = !el.dataset.for.split(' ').includes(kind.value));
+    document.getElementById('c-preview').textContent = currentCron();
+  };
+  document.querySelectorAll('#c-kind, #c-dow, #c-dom, #c-time, #c-min, #c-expr').forEach(el => el.addEventListener('input', refresh));
+  refresh();
+}
+
+async function viewService(id) {
+  const token = viewToken;
+  $app.innerHTML = `<p class="muted" style="padding:2rem 0">${t('common.loading')}</p>`;
+  let s, srv;
+  try { s = await api(`admin/services/${id}`); srv = await api(`admin/servers/${s.server_id}`); } catch (e) { return showError($app, e); }
+  if (token !== viewToken) return;
+  const def = s.task_def;
+  const jobs = s.jobs.map(j => {
+    const st = j.state === 'done' ? (+j.result_ok ? ['job_ok', 'ok'] : ['job_failed', 'err']) : j.state === 'expired' ? ['job_expired', 'warn'] : ['job_pending', 'run'];
+    return `<a href="#" data-job="${j.id}"><span class="badge lv-${st[1]}">${t(`detail.${st[0]}`)}</span>
+      <span><strong>${t(j.kind === 'check' ? 'detail.job_check' : 'detail.job_run')}</strong><small>${t('detail.job_n', { n: j.id })}</small></span>
+      <span class="muted">${esc(ago(+j.created_at))}</span><span></span></a>`;
+  }).join('');
+  const state = s.enabled ? t('detail.scheduled', { cron: esc(s.schedule) }) : t('detail.unscheduled');
+  $app.innerHTML = `<div class="page-head"><div class="crumb"><a href="#/servers">${t('servers.title')}</a> › <a href="#/servers/${s.server_id}">${esc(s.server_name)}</a></div>
+      <h1>${esc(s.name)}</h1><p>${t('detail.summary', { task: esc(s.task), state })}</p></div>
+    <div id="v-msg"></div>
+    <div class="actions" style="margin-top:0">
+      <button class="btn" id="v-test">${t('detail.test')}</button><button class="btn" id="v-run">${t('detail.run')}</button>
+      <a class="btn" href="#/t-${s.id}">${t('detail.history')}</a></div>
+    <div id="v-job"></div>
+
+    <h2 class="section">${t('detail.schedule')}</h2>
+    <div class="stack" style="max-width:40rem">${scheduleForm(s.schedule)}
+      <div class="actions" style="margin-top:0"><button class="btn primary" id="v-sched">${s.enabled ? t('detail.change_schedule') : t('svc.schedule_enable')}</button>
+      ${s.enabled ? `<button class="btn" id="v-off">${t('detail.disable')}</button>` : ''}</div></div>
+
+    <h2 class="section">${t('detail.params')}</h2>
+    ${def ? `<form class="stack" id="f-params">
+      <div class="field"><label for="p-name">${t('svc.name')}</label><input type="text" id="p-name" required maxlength="100" value="${esc(s.name)}"></div>
+      ${def.params.map(p => paramField(s.task, p, s.params[p.name], srv)).join('')}${datalists(srv)}
+      <div class="field"><label for="p-age">${t('detail.late_after')} <span class="opt">${t('detail.minutes_default', { n: `${s.auto_max_age ?? def.max_age} min ≈ ${dur((s.auto_max_age ?? def.max_age) * 60)}` })}</span></label>
+        <input type="number" id="p-age" min="1" value="${s.max_age ?? ''}" style="max-width:10rem"></div>
+      <div class="field"><label for="p-run">${t('detail.long_after')} <span class="opt">${t('detail.minutes_task', { n: def.max_runtime })}</span></label>
+        <input type="number" id="p-run" min="1" value="${s.max_runtime ?? ''}" style="max-width:10rem"></div>
+      <div class="actions"><button class="btn primary" type="submit">${t('common.save')}</button></div></form>`
+      : msg('err', t('detail.task_gone'))}
+
+    <h2 class="section">${t('detail.jobs')}</h2>
+    ${jobs ? `<div class="rows services">${jobs}</div>` : `<p class="empty-note">${t('detail.no_jobs')}</p>`}
+    <div class="actions"><button class="btn danger" id="v-del">${t('detail.delete')}</button></div>`;
+  bindScheduleForm(s.schedule);
+  const out = document.getElementById('v-msg');
+  const jobBox = document.getElementById('v-job');
+  const launch = async kind => { const tok = ++viewToken; await runJob(tok, id, kind, jobBox); };
+  document.getElementById('v-test').onclick = () => launch('check');
+  document.getElementById('v-run').onclick = () => {
+    if (s.task === 'reboot' && !confirm(t('detail.confirm_reboot', { server: s.server_name }))) return;
+    launch('run');
+  };
+  document.getElementById('v-sched').onclick = async () => {
+    try { await api(`admin/services/${id}/schedule`, { schedule: currentCron() }); viewService(id); }
+    catch (e) {
+      if (confirm(t('detail.force', { msg: e.message }))) {
+        try { await api(`admin/services/${id}/schedule`, { schedule: currentCron(), force: true }); viewService(id); } catch (e2) { showError(out, e2); }
+      } else showError(out, e);
+    }
+  };
+  document.getElementById('v-off')?.addEventListener('click', async () => {
+    try { await api(`admin/services/${id}/schedule`, { schedule: '' }); viewService(id); } catch (e) { showError(out, e); }
+  });
+  document.getElementById('f-params')?.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const age = document.getElementById('p-age').value, run = document.getElementById('p-run').value;
+    try {
+      await api(`admin/services/${id}`, { name: document.getElementById('p-name').value, params: readParams(ev.target),
+        max_age: age === '' ? null : +age, max_runtime: run === '' ? null : +run });
+      out.innerHTML = msg('ok', t('detail.saved'));
+    } catch (e) { showError(out, e); }
+    window.scrollTo(0, 0);
+  });
+  document.getElementById('v-del').onclick = async () => {
+    if (!confirm(t('detail.confirm_delete', { name: s.name }))) return;
+    try { await api(`admin/services/${id}/delete`, {}); location.hash = `#/servers/${s.server_id}`; } catch (e) { showError(out, e); }
+  };
+  $app.querySelectorAll('[data-job]').forEach(a => a.onclick = async ev => {
+    ev.preventDefault();
+    try {
+      const j = await api(`admin/jobs/${a.dataset.job}`);
+      jobBox.innerHTML = `<h2 class="section">${t('detail.job_title', { n: j.id })}</h2>` + (j.output ? `<pre class="log">${esc(j.output)}</pre>` : msg('info', t('detail.no_output')));
+      jobBox.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    } catch (e) { showError(jobBox, e); }
+  });
+}
+
+// ═══ Audit log and settings ═════════════════════════════════════════════════
+async function viewAudit() {
+  $app.innerHTML = `<div class="page-head"><h1>${t('audit.title')}</h1><p>${t('audit.intro')}</p></div><div id="list"></div>`;
+  try {
+    const rows = await api('admin/audit?limit=200');
+    document.getElementById('list').innerHTML = `<div class="rows audit">${rows.map(a => `<div class="row">
+      <span class="muted">${esc(day(+a.at))} ${hm(+a.at)}</span><span>${esc(a.actor)}</span><span><code>${esc(a.action)}</code></span><span class="muted">${esc(a.detail || '')}</span></div>`).join('')}</div>`;
+  } catch (e) { showError(document.getElementById('list'), e); }
+}
+
+function viewSettings() {
+  $app.innerHTML = `<div class="page-head"><h1>${t('settings.title')}</h1></div>
+    <h2 class="section">${t('settings.password')}</h2>
+    <form class="stack" id="f-pw">
+      <input type="text" name="username" value="admin" autocomplete="username" hidden>
+      <div class="field"><label for="c-cur">${t('settings.current')}</label><input type="password" id="c-cur" required autocomplete="current-password"></div>
+      <div class="field"><label for="c-new">${t('settings.new')}</label><input type="password" id="c-new" required minlength="12" autocomplete="new-password"></div>
+      <div class="field"><label for="c-new2">${t('settings.confirm')}</label><input type="password" id="c-new2" required minlength="12" autocomplete="new-password"></div>
+      <div class="field"><label for="c-code">${t('settings.code')}</label><input class="code" type="text" id="c-code" inputmode="numeric" maxlength="7" required autocomplete="one-time-code"></div>
+      <div id="c-msg"></div>
+      <div class="actions"><button class="btn primary" type="submit">${t('settings.submit')}</button></div>
+    </form>
+    <h2 class="section">${t('settings.session')}</h2>
+    <p class="muted" style="max-width:60ch">${t('settings.session_text')}</p>
+    <div class="actions"><button class="btn" id="c-logout">${t('settings.logout')}</button></div>`;
+  document.getElementById('f-pw').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const box = document.getElementById('c-msg');
+    if (document.getElementById('c-new').value !== document.getElementById('c-new2').value) { box.innerHTML = msg('err', t('setup.mismatch')); return; }
+    try {
+      await api('auth/password', { current: document.getElementById('c-cur').value, totp: document.getElementById('c-code').value, password: document.getElementById('c-new').value });
+      ev.target.reset(); box.innerHTML = msg('ok', t('settings.changed'));
+    } catch (e) { showError(box, e); }
+  });
+  document.getElementById('c-logout').onclick = async () => { await api('auth/logout', {}).catch(() => {}); dashState = null; location.hash = '#/'; boot(); };
+}
+
+// A view that fails must say so instead of staying on "Loading…"
+window.addEventListener('unhandledrejection', ev => {
+  if (ev.reason instanceof AuthNeeded) return;
+  console.error(ev.reason);
+  $app.insertAdjacentHTML('afterbegin', msg('err', ev.reason?.message && !(ev.reason instanceof TypeError)
+    ? ev.reason.message : t('err.unexpected', { msg: String(ev.reason?.message ?? ev.reason) })));
+});
+
+renderChrome();
+boot();
+</script>
+</body>
+</html>
