@@ -339,4 +339,4 @@ docs/screenshots/
 - [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) font by the Braille Institute, SIL Open Font Licence, loaded from Google Fonts with a system font fallback.
 
 ## Licence
-**GNU GPL v3.0** [LICENCE.md](https://github.com/toninodigiacomo/jellyquity-theme/blob/3958e0d22174ac0e426bb56ebe5fb73bf4e341b6/LICENCE.md)
+**GNU GPL v3.0** [LICENCE.md](https://github.com/toninodigiacomo/vigie/blob/738d3aec9b091280c3edebea4172e9205d359cbd/LICENSE.md)
